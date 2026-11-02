@@ -71,6 +71,12 @@ enum VaultSmokeCheck {
 
     static func safeReason(_ error: Error) -> String {
         if error is CancellationError { return "cancelled" }
+        if let input = error as? TerminalInputError {
+            switch input {
+            case .terminalRequired: return "a controlling local terminal is required"
+            case .invalidInput: return "empty, invalid or oversized password input"
+            }
+        }
         if let error = error as? CLIProcessError {
             switch error {
             case .nonzeroExit(let code): return "CLI exited with code \(code)"

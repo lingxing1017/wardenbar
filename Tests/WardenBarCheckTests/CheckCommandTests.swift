@@ -45,4 +45,30 @@ final class CheckCommandTests: XCTestCase {
         XCTAssertFalse(result.output.contains("example.invalid"))
         XCTAssertFalse(result.output.contains("synthetic"))
     }
+
+    func testExerciseUsesExplicitLocalPasswordReader() async throws {
+        let fixture = try CheckFixture()
+        let result = await CheckCommand.run(arguments: [
+            "--exercise", "--cli", fixture.configuration.executable.path,
+            "--data-dir", fixture.configuration.dataDirectory.path
+        ], readPassword: { "synthetic-master" })
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(result.output.contains("Password read: passed"))
+        XCTAssertTrue(result.output.contains("Lock: passed"))
+    }
+
+    func testOrdinaryDiagnosticsAndInvalidExerciseArgumentsDoNotReadPassword() async throws {
+        let fixture = try CheckFixture()
+        let base = ["--cli", fixture.configuration.executable.path, "--data-dir", fixture.configuration.dataDirectory.path]
+        let ordinary = await CheckCommand.run(arguments: base, readPassword: {
+            XCTFail("Ordinary diagnostics must not ask for a password")
+            return "synthetic-master"
+        })
+        XCTAssertEqual(ordinary.exitCode, 0)
+        let invalid = await CheckCommand.run(arguments: base + ["--exercise", "--exercise"], readPassword: {
+            XCTFail("Invalid arguments must not ask for a password")
+            return "synthetic-master"
+        })
+        XCTAssertEqual(invalid.exitCode, 2)
+    }
 }
