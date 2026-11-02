@@ -1,0 +1,84 @@
+#!/usr/bin/python3
+"""Synthetic CLI boundary fixture; never uses a server or real credentials."""
+import json
+import os
+import pathlib
+import sys
+import time
+
+root = pathlib.Path(os.environ["BITWARDENCLI_APPDATA_DIR"])
+args = sys.argv[1:]
+session = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+item_id = "11111111-1111-1111-1111-111111111111"
+
+def fail(code=64):
+    print("synthetic-sensitive-error", file=sys.stderr)
+    sys.exit(code)
+
+if any(key in os.environ for key in ("NODE_OPTIONS", "BITWARDENCLI_DEBUG")):
+    fail()
+if any("synthetic" in value or session in value for value in args):
+    fail()
+if not args or args[-1] != "--nointeraction":
+    fail()
+args = args[:-1]
+command = args[0]
+if command != "unlock" and "BW_UNLOCK_PASSWORD" in os.environ:
+    fail()
+
+def delay(name):
+    (root / (name + "-started")).touch()
+    while (root / ("delay-" + name)).exists() and not (root / ("release-" + name)).exists():
+        time.sleep(0.01)
+
+def item(identifier=item_id, **extra):
+    value = {
+        "object": "item", "id": identifier, "organizationId": None, "folderId": None,
+        "type": 1, "reprompt": 0, "name": "Synthetic login", "favorite": True,
+        "revisionDate": "2026-01-01T00:00:00Z", "deletedDate": None,
+        "notes": "synthetic-note-do-not-retain", "fields": [], "collectionIds": [],
+        "login": {"username": "synthetic-user", "password": "\n secret\t \n",
+                  "totp": "synthetic-seed-do-not-retain", "uris": [{"uri": "https://example.invalid", "match": None}]}
+    }
+    value.update(extra)
+    return value
+
+if args == ["--version"]:
+    print("2026.10.0")
+elif args == ["status"]:
+    print(json.dumps({"serverUrl": "https://example.invalid", "lastSync": None,
+                      "userEmail": "synthetic@example.invalid", "userId": item_id,
+                      "status": "unlocked" if os.environ.get("BW_SESSION") == session else "locked"}))
+elif args == ["unlock", "--passwordenv", "BW_UNLOCK_PASSWORD", "--raw"]:
+    if os.environ.get("BW_UNLOCK_PASSWORD") != "synthetic-master" or "BW_SESSION" in os.environ:
+        fail(1)
+    delay("unlock")
+    print("unexpected-sensitive-output" if (root / "bad-session").exists() else session, end="")
+elif args == ["lock"]:
+    (root / "lock-called").touch()
+    if (root / "fail-lock").exists():
+        fail(9)
+    print("Your vault is locked.")
+else:
+    if os.environ.get("BW_SESSION") != session:
+        fail(1)
+    if args == ["list", "items"]:
+        delay("list")
+        if (root / "malformed-list").exists():
+            print("not-json-synthetic-sensitive-data")
+        else:
+            print(json.dumps([
+                item(), item("22222222-2222-2222-2222-222222222222", reprompt=1),
+                item("33333333-3333-3333-3333-333333333333", organizationId="synthetic-org"),
+                item("44444444-4444-4444-4444-444444444444", type=2, login=None),
+                item("55555555-5555-5555-5555-555555555555", deletedDate="2026-01-01T00:00:00Z")
+            ]))
+    elif args == ["get", "item", item_id]:
+        delay("read")
+        print(json.dumps(item(reprompt=1 if (root / "protected-read").exists() else 0)))
+    elif args == ["sync"]:
+        if (root / "fail-sync").exists():
+            fail(8)
+        print("Syncing complete.")
+    else:
+        fail()
