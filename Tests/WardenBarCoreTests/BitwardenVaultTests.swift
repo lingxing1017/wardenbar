@@ -112,6 +112,25 @@ final class BitwardenVaultTests: XCTestCase {
         XCTAssertEqual(state, .locked)
     }
 
+    func testStatusPollingPreservesLockFailureUntilSuccessfulRetry() async throws {
+        try await vault.unlock(masterPassword: "synthetic-master")
+        try flag("fail-lock")
+        do {
+            try await vault.lock()
+            XCTFail("Expected backend lock failure")
+        } catch let error as CLIProcessError { XCTAssertEqual(error, .nonzeroExit(9)) }
+
+        let backendStatus = try await vault.status()
+        XCTAssertEqual(backendStatus, .locked)
+        let failedState = await vault.state
+        XCTAssertEqual(failedState, .lockFailed)
+
+        try FileManager.default.removeItem(at: configuration.dataDirectory.appendingPathComponent("fail-lock"))
+        try await vault.lock()
+        let recoveredState = await vault.state
+        XCTAssertEqual(recoveredState, .locked)
+    }
+
     func testLockDuringReadDiscardsOldPasswordResult() async throws {
         try await vault.unlock(masterPassword: "synthetic-master")
         _ = try await vault.items()
