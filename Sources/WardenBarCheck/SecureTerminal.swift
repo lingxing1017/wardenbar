@@ -35,6 +35,7 @@ enum SecureTerminal {
         try FileHandle.standardError.write(contentsOf: Data("Master password (hidden): ".utf8))
         var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
         var length = 0
+        var invalid = false
         while true {
             try Task.checkCancellation()
             let ready = poll(&descriptor, 1, 50)
@@ -51,11 +52,13 @@ enum SecureTerminal {
                 let password = buffer.withUnsafeBytes { bytes in
                     String(bytes: bytes.prefix(length), encoding: .utf8)
                 }
-                guard length > 0, let password else { throw TerminalInputError.invalidInput }
+                guard !invalid, length > 0, let password else { throw TerminalInputError.invalidInput }
                 try Task.checkCancellation()
                 try FileHandle.standardError.write(contentsOf: Data("\nRunning read-only vault checks...\n".utf8))
                 return password
             }
+            // Do not restore echo while the remainder of a rejected paste may still arrive.
+            if invalid { continue }
             if byte == 8 || byte == 127 {
                 // Erase an entire UTF-8 code point, without echoing characters or masks.
                 while length > 0 {
@@ -73,7 +76,14 @@ enum SecureTerminal {
                 length = 0
                 continue
             }
-            guard byte != 0, byte != 4, length < buffer.count - 2 else { throw TerminalInputError.invalidInput }
+            guard byte != 0, byte != 4, length < buffer.count - 2 else {
+                invalid = true
+                buffer.withUnsafeMutableBytes { bytes in
+                    _ = memset_s(bytes.baseAddress, bytes.count, 0, bytes.count)
+                }
+                length = 0
+                continue
+            }
             buffer[length] = CChar(bitPattern: byte)
             length += 1
         }

@@ -26,7 +26,7 @@ def setup(root):
     return [binary, "--exercise", "--cli", str(fixture), "--data-dir", str(data)], data
 
 
-def check_pty(name, password=None, interrupt=None, delayed=False, piped=False):
+def check_pty(name, password=None, interrupt=None, delayed=False, piped=False, streamed=False):
     with tempfile.TemporaryDirectory(prefix="wardenbar-pty-") as directory:
         args, data = setup(Path(directory))
         if delayed:
@@ -44,6 +44,8 @@ def check_pty(name, password=None, interrupt=None, delayed=False, piped=False):
         initial_flags = termios.tcgetattr(master)
         prompted = False
         sent_signal = False
+        tail_sent = False
+        tail_deadline = None
         status = None
         deadline = time.monotonic() + 15
         try:
@@ -60,13 +62,21 @@ def check_pty(name, password=None, interrupt=None, delayed=False, piped=False):
                     assert not (termios.tcgetattr(master)[3] & termios.ECHO), "Password echo was enabled"
                     prompted = True
                     if password is not None:
-                        os.write(master, password + b"\n")
+                        if streamed:
+                            os.write(master, b"x" * 1023)
+                            tail_deadline = time.monotonic() + 0.1
+                        else:
+                            os.write(master, password + b"\n")
                     elif interrupt:
                         if interrupt == signal.SIGINT:
                             os.write(master, b"\x03")
                         else:
                             os.kill(pid, interrupt)
                         sent_signal = True
+                if streamed and tail_deadline is not None and not tail_sent and time.monotonic() >= tail_deadline:
+                    assert not (termios.tcgetattr(master)[3] & termios.ECHO), "Overflow restored echo before the pasted line ended"
+                    os.write(master, b"synthetic-password-tail\n")
+                    tail_sent = True
                 if delayed and prompted and not sent_signal and (data / "sync-started").exists():
                     if interrupt == signal.SIGINT:
                         os.write(master, b"\x03")
@@ -78,6 +88,8 @@ def check_pty(name, password=None, interrupt=None, delayed=False, piped=False):
                     if os.WIFSTOPPED(current):
                         raise AssertionError(f"PTY child stopped by signal {os.WSTOPSIG(current)}")
                     status = current
+                    if streamed:
+                        assert tail_sent, "Overflow returned before consuming the entire pasted line"
                     while select.select([master], [], [], 0)[0]:
                         try:
                             remaining = os.read(master, 65536)
@@ -94,6 +106,7 @@ def check_pty(name, password=None, interrupt=None, delayed=False, piped=False):
             assert termios.tcgetattr(master) == initial_flags, "Terminal settings were not restored"
             assert b"synthetic-master" not in transcript, "Synthetic password was echoed"
             assert b"secret" not in transcript, "Vault content was printed"
+            assert b"synthetic-password-tail" not in transcript, "Remaining pasted password was echoed"
             assert os.WIFEXITED(status), "Command exited from a signal without cleanup"
             code = os.WEXITSTATUS(status)
             if piped:
@@ -126,6 +139,12 @@ with tempfile.TemporaryDirectory(prefix="wardenbar-no-tty-") as directory:
     assert not (data / "unlock-started").exists()
     assert b"synthetic-master" not in result.stdout + result.stderr
     print("non-TTY password rejection: passed")
+
+mode = sys.argv[2] if len(sys.argv) > 2 else "all"
+if mode in ("all", "overflow"):
+    check_pty("streamed oversized paste rejection", password=b"x" * 1100, streamed=True)
+if mode != "all":
+    sys.exit(0)
 
 check_pty("hidden input and restoration", password=b"synthetic-master")
 check_pty("pipe rejected even with controlling terminal", piped=True)
