@@ -143,6 +143,8 @@ with tempfile.TemporaryDirectory(prefix="wardenbar-no-tty-") as directory:
 mode = sys.argv[2] if len(sys.argv) > 2 else "all"
 if mode in ("all", "overflow"):
     check_pty("streamed oversized paste rejection", password=b"x" * 1100, streamed=True)
+if mode in ("all", "hangup"):
+    check_pty("terminal hangup during sync cleanup", password=b"synthetic-master", interrupt=signal.SIGHUP, delayed=True)
 if mode != "all":
     sys.exit(0)
 
