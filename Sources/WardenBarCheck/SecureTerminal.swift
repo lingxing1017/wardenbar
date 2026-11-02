@@ -96,7 +96,7 @@ final class SignalCancellation {
     private var restorers: [() -> Void] = []
 
     init(cancel: @escaping @Sendable () -> Void) {
-        for number in [SIGINT, SIGTERM] {
+        for number in [SIGINT, SIGTERM, SIGHUP] {
             let previous = Darwin.signal(number, SIG_IGN)
             restorers.append { _ = Darwin.signal(number, previous) }
             let source = DispatchSource.makeSignalSource(signal: number, queue: .global(qos: .userInitiated))
