@@ -48,7 +48,8 @@ if args == ["--version"]:
 elif args == ["status"]:
     print(json.dumps({"serverUrl": "https://example.invalid", "lastSync": None,
                       "userEmail": "synthetic@example.invalid", "userId": item_id,
-                      "status": "unlocked" if os.environ.get("BW_SESSION") == session else "locked"}))
+                      "status": "unauthenticated" if (root / "unauthenticated-status").exists()
+                      else ("unlocked" if os.environ.get("BW_SESSION") == session else "locked")}))
 elif args == ["unlock", "--passwordenv", "BW_UNLOCK_PASSWORD", "--raw"]:
     if os.environ.get("BW_UNLOCK_PASSWORD") != "synthetic-master" or "BW_SESSION" in os.environ:
         fail(1)
@@ -66,6 +67,8 @@ else:
         delay("list")
         if (root / "malformed-list").exists():
             print("not-json-synthetic-sensitive-data")
+        elif (root / "empty-list").exists():
+            print("[]")
         else:
             print(json.dumps([
                 item(), item("22222222-2222-2222-2222-222222222222", reprompt=1),
@@ -77,6 +80,7 @@ else:
         delay("read")
         print(json.dumps(item(reprompt=1 if (root / "protected-read").exists() else 0)))
     elif args == ["sync"]:
+        delay("sync")
         if (root / "fail-sync").exists():
             fail(8)
         print("Syncing complete.")

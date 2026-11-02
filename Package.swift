@@ -15,6 +15,6 @@ let package = Package(
             name: "WardenBarCoreTests", dependencies: ["WardenBarCore"],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "WardenBarCheckTests", dependencies: ["WardenBarCheck"])
+        .testTarget(name: "WardenBarCheckTests", dependencies: ["WardenBarCheck", "WardenBarCore"])
     ]
 )
