@@ -38,7 +38,10 @@ public actor BitwardenVault {
             generation &+= 1
             session = nil
             authorizedIDs.removeAll()
-            state = reported == .unauthenticated ? .unauthenticated : .locked
+            // Without BW_SESSION, coarse status cannot prove a failed backend lock was repaired.
+            if state != .lockFailed {
+                state = reported == .unauthenticated ? .unauthenticated : .locked
+            }
         } else if session == nil {
             throw VaultError.invalidResponse
         }
