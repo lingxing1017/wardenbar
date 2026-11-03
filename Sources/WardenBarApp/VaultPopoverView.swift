@@ -80,9 +80,14 @@ struct VaultPopoverView: View {
         VStack(spacing: 16) {
             Image(systemName: "externaldrive").font(.largeTitle).foregroundStyle(.secondary)
             Text("连接密码库").font(.title2.weight(.semibold))
-            Text("先为独立目录完成 CLI 登录，之后即可在这里解锁。").multilineTextAlignment(.center).foregroundStyle(.secondary)
+            Text(configurationIssue == nil ? "先为独立目录完成 CLI 登录，之后即可在这里解锁。" : "修复本地配置后，请重新打开应用。")
+                .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Text(dataDirectory.path).font(.caption).textSelection(.enabled).multilineTextAlignment(.center)
-            Button("重新检查") { Task { await store.start() } }.buttonStyle(.borderedProminent)
+            if configurationIssue == nil {
+                Button("重新检查") { Task { await store.start() } }.buttonStyle(.borderedProminent)
+            } else {
+                Button("退出应用") { NSApp.terminate(nil) }.buttonStyle(.borderedProminent)
+            }
             Button("打开目录") { NSWorkspace.shared.open(dataDirectory) }.buttonStyle(.borderless)
         }.padding(28).frame(maxHeight: .infinity)
     }
