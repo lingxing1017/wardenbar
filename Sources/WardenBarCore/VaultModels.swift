@@ -38,6 +38,9 @@ public struct VaultItemSummary: Sendable, Equatable, Identifiable {
     public let folderID: String?
     public var hasPassword: Bool = true
     public var hasTOTP: Bool = false
+    public var type: VaultItemType = .login
+    public var subtitle: String?
+    public var primaryFieldID: String?
 }
 
 public struct VaultFolder: Sendable, Equatable, Identifiable, Decodable {
@@ -62,10 +65,15 @@ struct WireItem: Decodable {
     let favorite: Bool?
     let folderId: String?
     let login: Login?
+    let card: Card?
+    let identity: Identity?
+    let secureNote: SecureNote?
+    let sshKey: SSHKey?
+    let notes: String?
+    let fields: [CustomField]?
 
     var isSupported: Bool {
-        UUID(uuidString: id) != nil && type == 1 && reprompt == 0
-            && organizationId == nil && deletedDate == nil && login != nil
+        isSupportedRecord && type == 1
     }
 
     var summary: VaultItemSummary {
@@ -73,8 +81,10 @@ struct WireItem: Decodable {
             id: id, name: name, username: login?.username,
             uris: login?.uris?.compactMap(\.uri) ?? [],
             favorite: favorite ?? false, folderID: folderId,
-            hasPassword: login?.password?.isEmpty == false,
-            hasTOTP: login?.totp?.isEmpty == false
+            hasPassword: type == 1 && login?.password?.isEmpty == false,
+            hasTOTP: type == 1 && login?.totp?.isEmpty == false,
+            type: VaultItemType(rawValue: type) ?? .login,
+            subtitle: recordSubtitle, primaryFieldID: primaryFieldID
         )
     }
 }
