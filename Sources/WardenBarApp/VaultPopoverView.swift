@@ -246,6 +246,9 @@ private struct VaultListView: View {
                         }.padding(.vertical, 7).tag(item.id)
                     }
                 }.listStyle(.inset).scrollContentBackground(.hidden)
+                    // Match the native table's offscreen row estimate to these two-line rows.
+                    // Otherwise measuring newly visible rows changes the scroll range/knob size.
+                    .environment(\.defaultMinListRowHeight, 54)
                 HStack {
                     Text("\(store.filteredItems.count) 条记录").font(.caption).foregroundStyle(.secondary)
                     Spacer()
