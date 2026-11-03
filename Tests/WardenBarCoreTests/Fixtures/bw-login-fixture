@@ -1,0 +1,39 @@
+#!/usr/bin/python3
+"""Synthetic account connection boundary; no network or real credentials."""
+import os, sys, pathlib, json, time
+root=pathlib.Path(os.environ['BITWARDENCLI_APPDATA_DIR'])
+args=sys.argv[1:]
+session='MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
+if not args or any('@' in a or 'synthetic' in a or session in a for a in args):sys.exit(64)
+command=args[0]
+with (root/'commands').open('a') as f:f.write(command+'\n')
+if command!='login' and 'BW_UNLOCK_PASSWORD' in os.environ:sys.exit(65)
+if command!='login':
+    if args[-1]!='--nointeraction':sys.exit(66)
+    args=args[:-1]
+if args==['--version']:print('2026.10.1')
+elif args==['status']:
+    print(json.dumps({'status':'locked' if (root/'authenticated').exists() else 'unauthenticated'}))
+elif args[:2]==['config','server'] and len(args)==3:
+    if (root/'authenticated').exists():sys.exit(67)
+    (root/'configured').touch()
+elif command=='login':
+    if args!=['login','--passwordenv','BW_UNLOCK_PASSWORD','--method','0','--raw']:sys.exit(68)
+    if os.environ.get('BW_UNLOCK_PASSWORD')!='synthetic-master':sys.exit(1)
+    def ask(prompt):
+        sys.stderr.write(prompt);sys.stderr.flush()
+        return sys.stdin.readline().rstrip('\n')
+    if ask('Email address:')!='synthetic@example.invalid':sys.exit(1)
+    for flag,prompt in [('needs-code','Two-step login code:'),('needs-device','New device verification required. Enter OTP sent to login email:'),('needs-secret','Additional authentication required.\nAPI key client_secret:')]:
+        if (root/flag).exists():
+            (root/(flag+'-started')).touch()
+            if ask(prompt)!='123456':sys.exit(1)
+    if (root/'fail-login').exists():
+        print('synthetic-sensitive-response',file=sys.stderr);sys.exit(1)
+    (root/'authenticated').touch()
+    print('invalid-sensitive-session' if (root/'bad-session').exists() else session,end='')
+elif args==['lock']:
+    (root/'lock-called').touch()
+    if (root/'fail-lock').exists():sys.exit(9)
+elif args==['list','items'] or args==['list','folders']:print('[]')
+else:sys.exit(69)

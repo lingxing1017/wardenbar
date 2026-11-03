@@ -62,6 +62,35 @@ public actor BitwardenVault {
         return reported
     }
 
+    public func login(server: VaultServer, masterPassword: String, method: CLITwoFactorMethod, dialogue: CLILoginDialogue) async throws {
+        guard state == .unauthenticated, operation == nil else { throw VaultError.busy }
+        guard !masterPassword.isEmpty, !masterPassword.contains("\0") else { throw VaultError.invalidPassword }
+        // Recheck the dedicated profile before changing its configured server.
+        guard try await status() == .unauthenticated else { throw VaultError.busy }
+        generation &+= 1
+        let token = generation
+        state = .unlocking
+        snapshot.removeAll()
+        authorizedIDs.removeAll()
+        do {
+            _ = try await perform(["config", "server", server.url.absoluteString])
+            guard token == generation, state == .unlocking else { throw VaultError.sessionChanged }
+            let data = try await perform(
+                ["login", "--passwordenv", "BW_UNLOCK_PASSWORD", "--method", String(method.rawValue), "--raw"],
+                masterPassword: masterPassword, interaction: dialogue, timeoutOverride: max(timeout, 180)
+            )
+            guard token == generation, state == .unlocking else { throw VaultError.sessionChanged }
+            guard let text = String(data: data, encoding: .utf8) else { throw VaultError.invalidResponse }
+            let key = text.trimmingCharacters(in: .newlines)
+            guard let decoded = Data(base64Encoded: key), decoded.count >= 16 else { throw VaultError.invalidResponse }
+            session = SecretValue(key)
+            state = .unlocked
+        } catch {
+            if token == generation { try? await lock() }
+            throw error
+        }
+    }
+
     public func unlock(masterPassword: String) async throws {
         guard state != .unlocking && state != .locking, operation == nil else { throw VaultError.busy }
         guard state != .unlocked else { throw VaultError.busy }
@@ -254,12 +283,13 @@ public actor BitwardenVault {
     }
 
     private func perform(
-        _ arguments: [String], authenticated: Bool = false, masterPassword: String? = nil
+        _ arguments: [String], authenticated: Bool = false, masterPassword: String? = nil,
+        interaction: (any CLIProcessInteraction)? = nil, timeoutOverride: TimeInterval? = nil
     ) async throws -> Data {
         guard operation == nil, state != .locking else { throw VaultError.busy }
         let started = ProcessInfo.processInfo.systemUptime
         // Only fixed verbs, never paths, item IDs, CLI output or credentials.
-        let category = ["unlock", "status", "list", "get", "sync", "--version"].contains(arguments.first ?? "") ? arguments[0] : "other"
+        let category = ["login", "config", "unlock", "status", "list", "get", "sync", "--version"].contains(arguments.first ?? "") ? arguments[0] : "other"
         defer { Self.recordDuration(category, since: started) }
         try Task.checkCancellation()
         try configuration.prepareDataDirectory()
@@ -274,11 +304,11 @@ public actor BitwardenVault {
         let id = nextOperation
         let runner = self.runner
         let configuration = self.configuration
-        let timeout = self.timeout
+        let timeout = timeoutOverride ?? self.timeout
         let task = Task {
             try await runner.run(
-                executable: configuration.executable, arguments: arguments + ["--nointeraction"],
-                environment: environment, timeout: timeout
+                executable: configuration.executable, arguments: arguments + (interaction == nil ? ["--nointeraction"] : []),
+                environment: environment, interaction: interaction, timeout: timeout
             )
         }
         operation = (id, task)
