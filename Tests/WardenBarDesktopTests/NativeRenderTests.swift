@@ -53,7 +53,16 @@ final class NativeRenderTests: XCTestCase {
         await store.start()
         try await render(store, name: "locked", dark: false)
         try await render(store, name: "locked-narrow", dark: false, width: PopoverWidth.minimum)
-        await store.unlock(masterPassword: "synthetic-master")
+        await backend.delayUnlock()
+        let unlocking = Task { await store.unlock(masterPassword: "synthetic-master") }
+        for _ in 0..<100 {
+            if await backend.unlockStarted { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(store.phase, .unlocking)
+        try await render(store, name: "unlocking-narrow", dark: true, width: PopoverWidth.minimum)
+        await backend.resumeUnlock()
+        await unlocking.value
         try await render(store, name: "list", dark: false)
         try await render(store, name: "list-narrow", dark: false, width: PopoverWidth.minimum)
         try await render(store, name: "list-wide", dark: false, width: PopoverWidth.maximum)

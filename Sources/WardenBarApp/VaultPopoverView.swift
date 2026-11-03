@@ -74,12 +74,22 @@ struct VaultPopoverView: View {
                 .lineLimit(1)
             Spacer()
             HStack(spacing: 8) {
-                if store.isWorking || store.isRefreshingFolders { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
                 Button {
                     let generation = store.generation
                     Task { await store.sync(expectedGeneration: generation) }
-                } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
-                    .labelStyle(.iconOnly).help("同步密码库")
+                } label: {
+                    Label("同步密码库", systemImage: "arrow.triangle.2.circlepath")
+                        .labelStyle(.iconOnly)
+                        .opacity(store.isWorking || store.isRefreshingFolders ? 0 : 1)
+                        .overlay {
+                            if store.isWorking || store.isRefreshingFolders {
+                                ProgressView().controlSize(.small).accessibilityHidden(true)
+                            }
+                        }
+                        .frame(width: 18, height: 18)
+                }
+                    .help("同步密码库")
+                    .accessibilityValue(store.isWorking || store.isRefreshingFolders ? (store.activityMessage ?? "正在处理") : "")
                     .disabled(store.phase != .unlocked || store.isWorking || store.isRefreshingFolders)
                 Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
                     .labelStyle(.iconOnly).help("锁定密码库")
