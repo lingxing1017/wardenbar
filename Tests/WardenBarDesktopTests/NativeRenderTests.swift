@@ -21,6 +21,7 @@ final class NativeRenderTests: XCTestCase {
         store.select(nil)
         await backend.useLongMetadata()
         await store.sync()
+        store.folderFilter = .folder("folder")
         try await render(store, name: "long-list", dark: false)
         await store.lock().value
     }

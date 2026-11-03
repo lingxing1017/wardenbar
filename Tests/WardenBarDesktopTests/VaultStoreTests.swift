@@ -14,6 +14,7 @@ actor ControlledVault: VaultBackend {
     private var failFolders = false
     var foldersStarted = false
     private var pauseFolders = false
+    private var folderName = "Personal"
     private var foldersWait: CheckedContinuation<Void, Never>?
     private var unlockWait: CheckedContinuation<Void, Never>?
     private var readWait: CheckedContinuation<Void, Never>?
@@ -34,7 +35,7 @@ actor ControlledVault: VaultBackend {
         foldersStarted = true
         if pauseFolders { await withCheckedContinuation { foldersWait = $0 } }
         if failFolders { throw CLIProcessError.nonzeroExit(1) }
-        return [VaultFolder(id: "folder", name: "Personal")]
+        return [VaultFolder(id: "folder", name: folderName)]
     }
     func totp(for id: String) async throws -> SecretValue {
         _ = try await password(for: id)
@@ -61,6 +62,7 @@ actor ControlledVault: VaultBackend {
     func delayFolders() { pauseFolders = true }
     func resumeFolders() { foldersWait?.resume(); foldersWait = nil }
     func useLongMetadata() {
+        folderName = "A very long folder name that must fit inside the compact folder control"
         records = [VaultItemSummary(id: "one", name: "A very long login name that must truncate before the copy actions", username: "long-account-name@example.invalid", uris: [], favorite: true, folderID: "folder", hasTOTP: true)]
     }
 }

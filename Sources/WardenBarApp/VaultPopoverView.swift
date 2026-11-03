@@ -130,16 +130,13 @@ private struct VaultListView: View {
                         Text("全部文件夹").tag(FolderFilter.all)
                         Text("未分类").tag(FolderFilter.unfiled)
                         ForEach(store.folders) { folder in
-                            Text(folder.name).tag(FolderFilter.folder(folder.id))
+                            Text(folder.name).lineLimit(1).truncationMode(.middle).tag(FolderFilter.folder(folder.id))
                         }
-                    }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity)
+                    }.labelsHidden().pickerStyle(.menu)
+                        .frame(maxWidth: 220, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
                         .accessibilityLabel("文件夹")
-                    Menu {
-                        Toggle("只看 Bitwarden 收藏", isOn: $store.favoritesOnly)
-                        Text("在 Bitwarden 中管理收藏")
-                    } label: {
-                        Label("筛选", systemImage: store.favoritesOnly ? "star.fill" : "line.3.horizontal.decrease.circle")
-                    }.fixedSize().help("筛选已有的 Bitwarden 收藏")
+                    Spacer(minLength: 0)
                 }
             }.padding(12)
             if store.isWorking && store.items.isEmpty {
@@ -151,7 +148,7 @@ private struct VaultListView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").font(.title).foregroundStyle(.secondary).accessibilityHidden(true)
                     Text(store.items.isEmpty ? "没有可显示的登录条目" : "未找到匹配项").font(.headline)
-                    Text(store.items.isEmpty ? "当前支持普通个人登录条目。" : "试试其他文件夹、筛选或搜索词。")
+                    Text(store.items.isEmpty ? "当前支持普通个人登录条目。" : "试试其他文件夹或搜索词。")
                         .font(.callout).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -189,21 +186,30 @@ private struct VaultListView: View {
                 HStack {
                     Text("\(store.filteredItems.count) 条登录").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("复制密码") {
-                        if let id = cursorID ?? store.filteredItems.first?.id { copyPassword(id) }
-                    }.keyboardShortcut("2", modifiers: .command)
-                        .disabled(store.isWorking || (store.filteredItems.first(where: { $0.id == cursorID }) ?? store.filteredItems.first)?.hasPassword != true)
                 }.padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
+        .background {
+            // Keep the keyboard command without a duplicate visible action or an implicit first-row target.
+            Button("复制选中条目的密码") {
+                if let id = cursorID { copyPassword(id) }
+            }.keyboardShortcut("2", modifiers: .command)
+                .disabled(store.isWorking || store.filteredItems.first(where: { $0.id == cursorID })?.hasPassword != true)
+                .hidden().accessibilityHidden(true)
+        }
         .onAppear { searchFocused = true }
         .onChange(of: store.filteredItems.map(\.id)) { ids in
-            if !ids.contains(cursorID ?? "") { cursorID = ids.first }
+            if !ids.contains(cursorID ?? "") { cursorID = nil }
         }
         .onMoveCommand { direction in
             let ids = store.filteredItems.map(\.id)
             guard !ids.isEmpty else { return }
-            let current = ids.firstIndex(of: cursorID ?? "") ?? 0
+            guard let current = ids.firstIndex(of: cursorID ?? "") else {
+                if direction == .down { cursorID = ids.first }
+                if direction == .up { cursorID = ids.last }
+                store.userDidInteract()
+                return
+            }
             if direction == .down { cursorID = ids[min(current + 1, ids.count - 1)] }
             if direction == .up { cursorID = ids[max(current - 1, 0)] }
             store.userDidInteract()
