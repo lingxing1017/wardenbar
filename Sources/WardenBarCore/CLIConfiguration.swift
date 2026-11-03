@@ -10,29 +10,46 @@ public enum CLIConfigurationError: Error, Equatable {
 public struct CLIConfiguration: Sendable {
     public let executable: URL
     public let dataDirectory: URL
+    private let runtimeSearchPath: String
+    private static let runtimeDirectories = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
 
     public static func discover(
         executable: URL? = nil,
         dataDirectory: URL? = nil,
+        searchPath: String? = ProcessInfo.processInfo.environment["PATH"],
         candidates: [URL] = [
             URL(fileURLWithPath: "/opt/homebrew/bin/bw"),
             URL(fileURLWithPath: "/usr/local/bin/bw")
         ]
     ) throws -> CLIConfiguration {
-        let choices = executable.map { [$0] } ?? candidates
-        guard let binary = choices.first(where: { url in
-            var isDirectory: ObjCBool = false
-            return url.isFileURL
-                && FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-                && !isDirectory.boolValue
-                && FileManager.default.isExecutableFile(atPath: url.path)
-        }) else {
+        // Do not search the current working directory via empty or relative PATH entries.
+        let directories = (searchPath ?? "").split(separator: ":").filter { $0.hasPrefix("/") }
+            .map { URL(fileURLWithPath: String($0), isDirectory: true).standardizedFileURL }
+        let choices = executable.map { [$0] } ?? (directories.map { $0.appendingPathComponent("bw") } + candidates)
+        guard let binary = choices.first(where: isExecutableFile) else {
             throw CLIConfigurationError.executableUnavailable
         }
         let directory = dataDirectory ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/WardenBar/CLI", isDirectory: true)
         guard directory.isFileURL else { throw CLIConfigurationError.unsafeDataDirectory }
-        return CLIConfiguration(executable: binary.standardizedFileURL, dataDirectory: directory.standardizedFileURL)
+        // npm's bw uses /usr/bin/env node. Retain the resolved interpreter directory,
+        // not the entire inherited PATH or shell environment.
+        let node = (directories + runtimeDirectories.map { URL(fileURLWithPath: $0, isDirectory: true) })
+            .map { $0.appendingPathComponent("node") }.first(where: isExecutableFile)
+        var runtime = [node?.deletingLastPathComponent().path, binary.deletingLastPathComponent().path].compactMap { $0 }
+        runtime += runtimeDirectories
+        var seen = Set<String>()
+        runtime = runtime.filter { seen.insert($0).inserted }
+        return CLIConfiguration(executable: binary.standardizedFileURL, dataDirectory: directory.standardizedFileURL,
+                                runtimeSearchPath: runtime.joined(separator: ":"))
+    }
+
+    private static func isExecutableFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return url.isFileURL
+            && FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+            && FileManager.default.isExecutableFile(atPath: url.path)
     }
 
     /// Does not adopt the terminal CLI's default authentication directory.
@@ -61,7 +78,7 @@ public struct CLIConfiguration: Sendable {
         for key in ["HOME", "TMPDIR", "LANG", "LC_ALL"] {
             result[key] = parent[key]
         }
-        result["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        result["PATH"] = runtimeSearchPath
         result["BITWARDENCLI_APPDATA_DIR"] = dataDirectory.path
         return result
     }
