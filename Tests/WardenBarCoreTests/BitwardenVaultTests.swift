@@ -23,6 +23,45 @@ final class BitwardenVaultTests: XCTestCase {
         try Data().write(to: configuration.dataDirectory.appendingPathComponent(name))
     }
 
+    func testFoldersAndLoginCapabilitiesDoNotRetainSecrets() async throws {
+        try await vault.unlock(masterPassword: "synthetic-master")
+        let folders = try await vault.folders()
+        XCTAssertEqual(folders.first?.name, "Synthetic folder")
+        let items = try await vault.items()
+        XCTAssertEqual(items.first?.hasPassword, true)
+        XCTAssertEqual(items.first?.hasTOTP, true)
+        XCTAssertFalse(String(reflecting: items).contains("synthetic-seed"))
+        try await vault.lock()
+        do { _ = try await vault.folders(); XCTFail("Locked folders") }
+        catch let error as VaultError { XCTAssertEqual(error, .locked) }
+    }
+
+    func testCodeReadRejectsUnindexedProtectedAndInvalidResponses() async throws {
+        try await vault.unlock(masterPassword: "synthetic-master")
+        do { _ = try await vault.totp(for: itemID); XCTFail("Unindexed code") }
+        catch let error as VaultError { XCTAssertEqual(error, .itemUnavailable) }
+        _ = try await vault.items()
+        let code = try await vault.totp(for: itemID)
+        XCTAssertEqual(code.withValue { $0 }, "123456")
+        try flag("invalid-totp")
+        do { _ = try await vault.totp(for: itemID); XCTFail("Invalid code") }
+        catch let error as VaultError { XCTAssertEqual(error, .invalidResponse) }
+        try flag("protected-read")
+        do { _ = try await vault.totp(for: itemID); XCTFail("Protected code") }
+        catch let error as VaultError { XCTAssertEqual(error, .itemUnavailable) }
+    }
+
+    func testLockDuringCodeReadDiscardsCode() async throws {
+        try await vault.unlock(masterPassword: "synthetic-master")
+        _ = try await vault.items()
+        try flag("delay-totp")
+        let reading = Task { try await vault.totp(for: itemID) }
+        try await waitForFile(configuration.dataDirectory.appendingPathComponent("totp-started"))
+        try await vault.lock()
+        do { _ = try await reading.value; XCTFail("Stale code") }
+        catch let error as VaultError { XCTAssertEqual(error, .sessionChanged) }
+    }
+
     func testUnlockIndexReadSyncAndLockThroughRealSubprocesses() async throws {
         try await vault.unlock(masterPassword: "synthetic-master")
         let status = try await vault.status()
