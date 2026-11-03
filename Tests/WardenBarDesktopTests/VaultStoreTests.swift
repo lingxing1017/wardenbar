@@ -1,0 +1,165 @@
+import AppKit
+import XCTest
+@testable import WardenBarCore
+@testable import WardenBarDesktop
+
+actor ControlledVault: VaultBackend {
+    var state: VaultState = .locked
+    var unlockStarted = false
+    var readStarted = false
+    private var pauseUnlock = false
+    private var pauseRead = false
+    private var failLock = false
+    private var failSync = false
+    private var unlockWait: CheckedContinuation<Void, Never>?
+    private var readWait: CheckedContinuation<Void, Never>?
+    private let records = [
+        VaultItemSummary(id: "one", name: "Café", username: "alice", uris: ["https://example.invalid"], favorite: true, folderID: nil),
+        VaultItemSummary(id: "two", name: "Mail", username: "bob", uris: ["https://mail.invalid"], favorite: false, folderID: nil)
+    ]
+
+    func status() -> CLIStatus { state == .unlocked ? .unlocked : .locked }
+    func unlock(masterPassword: String) async throws {
+        guard masterPassword == "synthetic-master" else { throw CLIProcessError.nonzeroExit(1) }
+        state = .unlocked
+        unlockStarted = true
+        if pauseUnlock { await withCheckedContinuation { unlockWait = $0 } }
+    }
+    func items() -> [VaultItemSummary] { records }
+    func password(for id: String) async throws -> SecretValue {
+        guard records.contains(where: { $0.id == id }) else { throw VaultError.itemUnavailable }
+        readStarted = true
+        if pauseRead { await withCheckedContinuation { readWait = $0 } }
+        return SecretValue("synthetic-password")
+    }
+    func sync() throws { if failSync { throw CLIProcessError.nonzeroExit(8) } }
+    func lock() throws {
+        state = failLock ? .lockFailed : .locked
+        if failLock { throw CLIProcessError.nonzeroExit(9) }
+    }
+    func delayUnlock() { pauseUnlock = true }
+    func delayRead() { pauseRead = true }
+    func resumeUnlock() { unlockWait?.resume(); unlockWait = nil }
+    func resumeRead() { readWait?.resume(); readWait = nil }
+    func rejectLock() { failLock = true }
+    func rejectSync() { failSync = true }
+}
+
+@MainActor
+final class VaultStoreTests: XCTestCase {
+    private func make(_ backend: ControlledVault) -> (VaultStore, NSPasteboard) {
+        let board = NSPasteboard(name: .init("WardenBarStoreTest-" + UUID().uuidString))
+        return (VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board)), board)
+    }
+
+    private func waitFor(_ predicate: () async -> Bool) async throws {
+        for _ in 0..<200 {
+            if await predicate() { return }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("Backend operation did not start")
+        throw NSError(domain: "ControlledVaultTimeout", code: 1)
+    }
+
+    func testSearchMatchesMetadataAndFavoritesInMemory() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        store.query = "cafe alice"
+        XCTAssertEqual(store.filteredItems.map(\.id), ["one"])
+        store.query = "mail.invalid"
+        XCTAssertEqual(store.filteredItems.map(\.id), ["two"])
+        store.favoritesOnly = true
+        XCTAssertTrue(store.filteredItems.isEmpty)
+    }
+
+    func testLockImmediatelyClearsIndexSelectionClipboardAndInputGeneration() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        store.select("one")
+        store.copyUsername(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "alice")
+        let generation = store.generation
+        let locking = store.lock()
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertNil(store.selectedItem)
+        XCTAssertNil(board.string(forType: .string))
+        XCTAssertNotEqual(store.generation, generation)
+        await locking.value
+        XCTAssertEqual(store.phase, .locked)
+    }
+
+    func testLatePasswordNeverReachesClipboardAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayRead()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let reading = Task { await store.copyPassword(for: "one") }
+        try await waitFor { await backend.readStarted }
+        await store.lock().value
+        await backend.resumeRead()
+        await reading.value
+        XCTAssertNil(board.string(forType: .string))
+        XCTAssertEqual(store.phase, .locked)
+        XCTAssertNil(store.notice)
+    }
+
+    func testLateUnlockDoesNotRepopulateMetadataAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayUnlock()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        let opening = Task { await store.unlock(masterPassword: "synthetic-master") }
+        try await waitFor { await backend.unlockStarted }
+        await store.lock().value
+        await backend.resumeUnlock()
+        await opening.value
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertEqual(store.phase, .locked)
+    }
+
+    func testLockFailureRemainsVisibleAndRejectsCopies() async {
+        let backend = ControlledVault()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        await backend.rejectLock()
+        await store.lock().value
+        await store.start()
+        await store.copyPassword(for: "one")
+        XCTAssertEqual(store.phase, .lockFailed)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertNil(board.string(forType: .string))
+    }
+
+    func testSyncFailureKeepsExistingMetadataWithoutRawError() async {
+        let backend = ControlledVault()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        await backend.rejectSync()
+        await store.sync()
+        XCTAssertEqual(store.items.count, 2)
+        XCTAssertEqual(store.phase, .unlocked)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertFalse(store.errorMessage!.contains("nonzeroExit"))
+    }
+
+    func testSafetyLockWhileAlreadyLockedResetsPartialPasswordForm() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        let before = store.generation
+        await store.lock().value
+        XCTAssertNotEqual(store.generation, before)
+        XCTAssertEqual(store.phase, .locked)
+    }
+}
