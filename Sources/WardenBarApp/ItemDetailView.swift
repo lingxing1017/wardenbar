@@ -28,10 +28,22 @@ struct ItemDetailView: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     Text("密码").font(.caption).foregroundStyle(.secondary)
-                    Text("••••••••••••").font(.body).accessibilityLabel("密码已隐藏")
+                    Text(item.hasPassword ? "••••••••••••" : "未设置密码").font(.body).accessibilityLabel(item.hasPassword ? "密码已隐藏" : "未设置密码")
                     Button(action: copyPassword) { Label("复制密码", systemImage: "doc.on.doc") }
                         .keyboardShortcut("2", modifiers: .command)
-                        .disabled(store.isWorking)
+                        .disabled(store.isWorking || !item.hasPassword)
+                }
+                if item.hasTOTP {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("动态验证码").font(.caption).foregroundStyle(.secondary)
+                        Button {
+                            let generation = store.generation
+                            Task { await store.copyTOTP(for: item.id, expectedGeneration: generation) }
+                        } label: { Label("复制动态验证码", systemImage: "clock") }
+                            .keyboardShortcut("3", modifiers: .command)
+                            .disabled(store.isWorking)
+                    }
                 }
                 if !item.uris.isEmpty {
                     Divider()

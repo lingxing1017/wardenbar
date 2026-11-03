@@ -10,24 +10,29 @@ final class NativeRenderTests: XCTestCase {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let board = NSPasteboard(name: .init("WardenBarRender-" + UUID().uuidString))
         defer { board.releaseGlobally() }
-        let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board))
+        let backend = ControlledVault()
+        let store = VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board))
         await store.start()
         try await render(store, name: "locked", dark: false)
         await store.unlock(masterPassword: "synthetic-master")
         try await render(store, name: "list", dark: false)
         store.select("one")
         try await render(store, name: "detail-dark", dark: true)
+        store.select(nil)
+        await backend.useLongMetadata()
+        await store.sync()
+        try await render(store, name: "long-list", dark: false)
         await store.lock().value
     }
 
     private func render(_ store: VaultStore, name: String, dark: Bool) async throws {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 390, height: 520), styleMask: .borderless, backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 520), styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let view = VaultPopoverView(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil)
-            .frame(width: 390, height: 520).environment(\.colorScheme, dark ? .dark : .light)
+            .frame(width: 360, height: 520).environment(\.colorScheme, dark ? .dark : .light)
         let host = NSHostingView(rootView: view)
         window.contentView = host
-        host.frame = NSRect(x: 0, y: 0, width: 390, height: 520)
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 520)
         host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
