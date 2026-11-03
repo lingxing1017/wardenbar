@@ -14,27 +14,31 @@ final class NativeRenderTests: XCTestCase {
         let store = VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board))
         await store.start()
         try await render(store, name: "locked", dark: false)
+        try await render(store, name: "locked-narrow", dark: false, width: PopoverWidth.minimum)
         await store.unlock(masterPassword: "synthetic-master")
         try await render(store, name: "list", dark: false)
+        try await render(store, name: "list-narrow", dark: false, width: PopoverWidth.minimum)
+        try await render(store, name: "list-wide", dark: false, width: PopoverWidth.maximum)
         store.select("one")
         try await render(store, name: "detail-dark", dark: true)
         store.select(nil)
         await backend.useLongMetadata()
         await store.sync()
         store.folderFilter = .folder("folder")
-        try await render(store, name: "long-list", dark: false)
+        try await render(store, name: "long-list", dark: false, width: PopoverWidth.minimum)
         await store.lock().value
     }
 
-    private func render(_ store: VaultStore, name: String, dark: Bool) async throws {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 520), styleMask: .borderless, backing: .buffered, defer: false)
+    private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue) async throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: CGFloat(width), height: 520), styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        let view = VaultPopoverView(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil)
-            .frame(width: 360, height: 520).environment(\.colorScheme, dark ? .dark : .light)
+        let view = ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: .constant(width))
+            .environment(\.colorScheme, dark ? .dark : .light)
         let host = NSHostingView(rootView: view)
         window.contentView = host
-        host.frame = NSRect(x: 0, y: 0, width: 360, height: 520)
+        host.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: 520)
         host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 0.5)
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
