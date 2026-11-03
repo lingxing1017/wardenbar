@@ -40,9 +40,19 @@ struct VaultPopoverView: View {
                         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                     case .setup: setup
                     case .unlocked:
-                        if let item = store.selectedItem { ItemDetailView(store: store, item: item)
-                            .id("\(store.generation):\(store.indexRevision):\(item.id)") }
-                        else { VaultListView(store: store) }
+                        ZStack {
+                            // Keep the native list and its exact scroll offset alive during details.
+                            // Leaving the unlocked phase still removes this entire subtree.
+                            VaultListView(store: store)
+                                .opacity(store.selectedItem == nil ? 1 : 0)
+                                .allowsHitTesting(store.selectedItem == nil)
+                                .accessibilityHidden(store.selectedItem != nil)
+                                .disabled(store.selectedItem != nil)
+                            if let item = store.selectedItem {
+                                ItemDetailView(store: store, item: item)
+                                    .id("\(store.generation):\(store.indexRevision):\(item.id)")
+                            }
+                        }
                     }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -251,6 +261,9 @@ private struct VaultListView: View {
                 .hidden().accessibilityHidden(true)
         }
         .onAppear { searchFocused = true }
+        .onChange(of: store.selectedID) { id in
+            if id != nil { searchFocused = false }
+        }
         .onChange(of: store.filteredItems.map(\.id)) { ids in
             if !ids.contains(cursorID ?? "") { cursorID = nil }
         }
