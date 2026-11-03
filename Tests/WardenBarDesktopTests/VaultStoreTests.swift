@@ -11,10 +11,14 @@ actor ControlledVault: VaultBackend {
     private var pauseRead = false
     private var failLock = false
     private var failSync = false
+    private var failFolders = false
+    var foldersStarted = false
+    private var pauseFolders = false
+    private var foldersWait: CheckedContinuation<Void, Never>?
     private var unlockWait: CheckedContinuation<Void, Never>?
     private var readWait: CheckedContinuation<Void, Never>?
     private let records = [
-        VaultItemSummary(id: "one", name: "Café", username: "alice", uris: ["https://example.invalid"], favorite: true, folderID: nil),
+        VaultItemSummary(id: "one", name: "Café", username: "alice", uris: ["https://example.invalid"], favorite: true, folderID: "folder", hasTOTP: true),
         VaultItemSummary(id: "two", name: "Mail", username: "bob", uris: ["https://mail.invalid"], favorite: false, folderID: nil)
     ]
 
@@ -26,6 +30,16 @@ actor ControlledVault: VaultBackend {
         if pauseUnlock { await withCheckedContinuation { unlockWait = $0 } }
     }
     func items() -> [VaultItemSummary] { records }
+    func folders() async throws -> [VaultFolder] {
+        foldersStarted = true
+        if pauseFolders { await withCheckedContinuation { foldersWait = $0 } }
+        if failFolders { throw CLIProcessError.nonzeroExit(1) }
+        return [VaultFolder(id: "folder", name: "Personal")]
+    }
+    func totp(for id: String) async throws -> SecretValue {
+        _ = try await password(for: id)
+        return SecretValue("123456")
+    }
     func password(for id: String) async throws -> SecretValue {
         guard records.contains(where: { $0.id == id }) else { throw VaultError.itemUnavailable }
         readStarted = true
@@ -43,10 +57,91 @@ actor ControlledVault: VaultBackend {
     func resumeRead() { readWait?.resume(); readWait = nil }
     func rejectLock() { failLock = true }
     func rejectSync() { failSync = true }
+    func rejectFolders() { failFolders = true }
+    func delayFolders() { pauseFolders = true }
+    func resumeFolders() { foldersWait?.resume(); foldersWait = nil }
 }
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testLateFoldersCannotRepopulateAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayFolders()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        let opening = Task { await store.unlock(masterPassword: "synthetic-master") }
+        try await waitFor { await backend.foldersStarted }
+        await store.lock().value
+        await backend.resumeFolders()
+        await opening.value
+        XCTAssertEqual(store.phase, .locked)
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertTrue(store.folders.isEmpty)
+    }
+    func testFolderFiltersIntersectSearchAndFavoritesAndClearOnLock() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        XCTAssertEqual(store.folders.first?.name, "Personal")
+        store.folderFilter = .folder("folder")
+        XCTAssertEqual(store.filteredItems.map(\.id), ["one"])
+        store.query = "bob"
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        store.query = ""
+        store.folderFilter = .unfiled
+        XCTAssertEqual(store.filteredItems.map(\.id), ["two"])
+        store.favoritesOnly = true
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        await store.lock().value
+        XCTAssertTrue(store.folders.isEmpty)
+        XCTAssertEqual(store.folderFilter, .all)
+    }
+
+    func testFolderReadFailureKeepsLoginListUsable() async {
+        let backend = ControlledVault()
+        await backend.rejectFolders()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        XCTAssertEqual(store.items.count, 2)
+        XCTAssertEqual(store.phase, .unlocked)
+        XCTAssertNotNil(store.errorMessage)
+        await store.copyPassword(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "synthetic-password")
+    }
+
+    func testCodeCopyAndUnavailableCodeLeaveClipboardSafe() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        await store.copyTOTP(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "123456")
+        store.copyUsername(for: "two")
+        await store.copyTOTP(for: "two")
+        XCTAssertEqual(board.string(forType: .string), "bob")
+    }
+
+    func testLateAndQueuedCodesCannotReachClipboardAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayRead()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let old = store.generation
+        let reading = Task { await store.copyTOTP(for: "one", expectedGeneration: old) }
+        try await waitFor { await backend.readStarted }
+        await store.lock().value
+        await backend.resumeRead()
+        await reading.value
+        await store.unlock(masterPassword: "synthetic-master")
+        await store.copyTOTP(for: "one", expectedGeneration: old)
+        XCTAssertNil(board.string(forType: .string))
+    }
     private func make(_ backend: ControlledVault) -> (VaultStore, NSPasteboard) {
         let board = NSPasteboard(name: .init("WardenBarStoreTest-" + UUID().uuidString))
         return (VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board)), board)

@@ -3,11 +3,15 @@ import Foundation
 import WardenBarCore
 
 public enum VaultPhase: Equatable { case checking, setup, locked, unlocking, unlocked, locking, lockFailed }
+public enum FolderFilter: Hashable { case all, unfiled, folder(String) }
 
 @MainActor
 public final class VaultStore: ObservableObject {
     @Published public private(set) var phase: VaultPhase = .checking
     @Published public private(set) var items: [VaultItemSummary] = []
+    @Published public private(set) var folders: [VaultFolder] = []
+    @Published public var folderFilter: FolderFilter = .all { didSet { userDidInteract() } }
+    @Published public private(set) var activityMessage: String?
     @Published public private(set) var selectedID: String?
     @Published public private(set) var isWorking = false
     @Published public private(set) var errorMessage: String?
@@ -36,7 +40,13 @@ public final class VaultStore: ObservableObject {
         return items.filter { item in
             let metadata = ([item.name, item.username ?? ""] + item.uris).joined(separator: " ")
                 .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            return (!favoritesOnly || item.favorite) && words.allSatisfy { metadata.contains($0) }
+            let matchesFolder: Bool
+            switch folderFilter {
+            case .all: matchesFolder = true
+            case .unfiled: matchesFolder = item.folderID == nil
+            case .folder(let id): matchesFolder = item.folderID == id
+            }
+            return matchesFolder && (!favoritesOnly || item.favorite) && words.allSatisfy { metadata.contains($0) }
         }.sorted {
             if $0.favorite != $1.favorite { return $0.favorite }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
@@ -70,17 +80,21 @@ public final class VaultStore: ObservableObject {
         let token = generation
         phase = .unlocking
         isWorking = true
+        activityMessage = "正在解锁…"
         errorMessage = nil
         notice = nil
         userDidInteract()
-        defer { if generation == token { isWorking = false } }
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
         do {
             try await backend.unlock(masterPassword: masterPassword)
             guard generation == token, phase == .unlocking else { return }
             phase = .unlocked
+            activityMessage = "正在读取登录条目…"
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
+            await loadFolders(backend, token: token)
+            guard generation == token, phase == .unlocked else { return }
             userDidInteract()
         } catch {
             guard generation == token else { return }
@@ -100,15 +114,18 @@ public final class VaultStore: ObservableObject {
         guard phase == .unlocked, !isWorking, let backend else { return }
         let token = generation
         isWorking = true
+        activityMessage = "正在同步…"
         errorMessage = nil
         userDidInteract()
-        defer { if generation == token { isWorking = false } }
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
         do {
             try await backend.sync()
             guard generation == token, phase == .unlocked else { return }
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
+            await loadFolders(backend, token: token)
+            guard generation == token, phase == .unlocked else { return }
             if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
             lastSync = Date()
             userDidInteract()
@@ -137,8 +154,9 @@ public final class VaultStore: ObservableObject {
         guard phase == .unlocked, !isWorking, items.contains(where: { $0.id == id }), let backend else { return }
         let token = generation
         isWorking = true
+        activityMessage = "正在读取密码…"
         userDidInteract()
-        defer { if generation == token { isWorking = false } }
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
         do {
             let password = try await backend.password(for: id)
             guard generation == token, phase == .unlocked else { return }
@@ -151,6 +169,38 @@ public final class VaultStore: ObservableObject {
         }
     }
 
+    public func copyTOTP(for id: String, expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
+        guard phase == .unlocked, !isWorking, items.contains(where: { $0.id == id && $0.hasTOTP }), let backend else { return }
+        let token = generation
+        isWorking = true
+        activityMessage = "正在读取验证码…"
+        userDidInteract()
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
+        do {
+            let code = try await backend.totp(for: id)
+            guard generation == token, phase == .unlocked else { return }
+            try code.withValue { try clipboard.copy($0) }
+            showNotice("验证码已复制，请及时使用")
+        } catch {
+            guard generation == token else { return }
+            errorMessage = "无法读取验证码，请检查条目是否配置了动态验证码及当前账号是否支持。"
+        }
+    }
+
+    private func loadFolders(_ backend: any VaultBackend, token: UInt64) async {
+        activityMessage = "正在读取文件夹…"
+        do {
+            let loaded = try await backend.folders()
+            guard generation == token, phase == .unlocked else { return }
+            folders = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            if case .folder(let id) = folderFilter, !folders.contains(where: { $0.id == id }) { folderFilter = .all }
+        } catch {
+            guard generation == token, phase == .unlocked else { return }
+            errorMessage = "文件夹读取失败，仍可搜索登录条目。请重试同步。"
+        }
+    }
+
     /// Invalidates visible and pending secrets synchronously, before backend cleanup can suspend.
     @discardableResult
     public func lock() -> Task<Void, Never> {
@@ -159,9 +209,12 @@ public final class VaultStore: ObservableObject {
         generation &+= 1
         let token = generation
         items.removeAll()
+        folders.removeAll()
+        folderFilter = .all
         selectedID = nil
         query = ""
         isWorking = false
+        activityMessage = nil
         noticeTimer?.cancel()
         notice = nil
         clipboard.clearIfOwned()
