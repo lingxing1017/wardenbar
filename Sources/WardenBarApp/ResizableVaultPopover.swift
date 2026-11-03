@@ -27,8 +27,10 @@ struct ResizableVaultPopover: View {
             .frame(width: CGFloat(width), height: 520)
             .background { PopoverWindowWidth(width: width).frame(width: 0, height: 0) }
             .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                CornerResizeGrip()
+                    .stroke(style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12, height: 12)
                     .frame(width: 24, height: 20).contentShape(Rectangle())
                     .help("左右拖动调整宽度")
                     .onHover { inside in
@@ -66,5 +68,16 @@ struct ResizableVaultPopover: View {
         if let liveWidth { savedWidth = PopoverWidth.clamp(liveWidth) }
         liveWidth = nil
         dragStart = nil
+    }
+}
+
+private struct CornerResizeGrip: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for inset: CGFloat in [3, 7, 11] {
+            path.move(to: CGPoint(x: rect.maxX - inset, y: rect.maxY - 1))
+            path.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.maxY - inset))
+        }
+        return path
     }
 }
