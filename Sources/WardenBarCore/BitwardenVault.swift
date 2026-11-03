@@ -18,6 +18,8 @@ public actor BitwardenVault {
     }
     private var snapshot: [String: SnapshotSecrets] = [:]
     private var session: SecretValue?
+    // A failed/cancelled first login may never have created an authenticated CLI profile.
+    private var unconfirmedLogin = false
     private var authorizedIDs = Set<String>()
     private var generation: UInt64 = 0
     private var nextOperation: UInt64 = 0
@@ -70,6 +72,7 @@ public actor BitwardenVault {
         generation &+= 1
         let token = generation
         state = .unlocking
+        unconfirmedLogin = true
         snapshot.removeAll()
         authorizedIDs.removeAll()
         do {
@@ -84,6 +87,7 @@ public actor BitwardenVault {
             let key = text.trimmingCharacters(in: .newlines)
             guard let decoded = Data(base64Encoded: key), decoded.count >= 16 else { throw VaultError.invalidResponse }
             session = SecretValue(key)
+            unconfirmedLogin = false
             state = .unlocked
         } catch {
             if token == generation { try? await lock() }
@@ -112,6 +116,7 @@ public actor BitwardenVault {
             }
             guard token == generation else { throw VaultError.sessionChanged }
             session = SecretValue(key)
+            unconfirmedLogin = false
             state = .unlocked
         } catch {
             if token == generation {
@@ -259,6 +264,22 @@ public actor BitwardenVault {
         let configuration = self.configuration
         let runner = self.runner
         let timeout = self.timeout
+        if unconfirmedLogin {
+            // Only for a login that never yielded a usable Session. A logged-out profile
+            // cannot run bw lock. Never use coarse status to clear ordinary lock failures.
+            let probe = Task {
+                try configuration.prepareDataDirectory()
+                return try await runner.run(executable: configuration.executable, arguments: ["status", "--nointeraction"],
+                                            environment: configuration.environment(), timeout: timeout)
+            }
+            struct ProbeStatus: Decodable { let status: CLIStatus }
+            if let data = try? await probe.value,
+               let reported = try? decode(ProbeStatus.self, from: data), reported.status == .unauthenticated {
+                unconfirmedLogin = false
+                state = .unauthenticated
+                return
+            }
+        }
         let task = Task {
             try configuration.prepareDataDirectory()
             return try await runner.run(
@@ -270,6 +291,7 @@ public actor BitwardenVault {
         defer { if operation?.id == id { operation = nil } }
         do {
             _ = try await task.value
+            unconfirmedLogin = false
             state = .locked
         } catch {
             state = .lockFailed

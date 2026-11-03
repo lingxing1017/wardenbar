@@ -50,6 +50,50 @@ final class AccountConnectionTests: XCTestCase {
         catch { XCTAssertFalse(String(reflecting: error).contains("sensitive")) }
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("lock-called").path))
     }
+    func testFailedLoginRemainsRetryableWithoutAuthenticatedLock() async throws {
+        let (vault, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: root.appendingPathComponent("fail-login").path, contents: Data())
+        _ = try await vault.status()
+        let first = try CLILoginDialogue(email: "synthetic@example.invalid", onChallenge: { _ in })
+        do { try await vault.login(server: .us, masterPassword: "synthetic-master", method: .authenticator, dialogue: first); XCTFail("Expected login failure") } catch { }
+        let state = await vault.state
+        XCTAssertEqual(state, .unauthenticated)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("fail-login"))
+        let retry = try CLILoginDialogue(email: "synthetic@example.invalid", onChallenge: { _ in })
+        try await vault.login(server: .us, masterPassword: "synthetic-master", method: .authenticator, dialogue: retry)
+        let completed = await vault.state
+        XCTAssertEqual(completed, .unlocked)
+        try await vault.lock()
+    }
+
+    func testUnknownLoginCleanupStateKeepsLockFailureBlocked() async throws {
+        let (vault, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: root.appendingPathComponent("needs-code").path, contents: Data())
+        _ = try await vault.status()
+        let dialogue = try CLILoginDialogue(email: "synthetic@example.invalid", onChallenge: { _ in })
+        let signingIn = Task { try await vault.login(server: .us, masterPassword: "synthetic-master", method: .authenticator, dialogue: dialogue) }
+        try await waitForFile(root.appendingPathComponent("needs-code-started"))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("fail-status").path, contents: Data())
+        do { try await vault.lock(); XCTFail("Unknown state must remain blocked") } catch { }
+        _ = await signingIn.result
+        let state = await vault.state
+        XCTAssertEqual(state, .lockFailed)
+    }
+
+    func testPartialAuthenticationLockFailureSurvivesCoarseStatus() async throws {
+        let (vault, root) = try make()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for flag in ["bad-session", "fail-lock"] { FileManager.default.createFile(atPath: root.appendingPathComponent(flag).path, contents: Data()) }
+        _ = try await vault.status()
+        let dialogue = try CLILoginDialogue(email: "synthetic@example.invalid", onChallenge: { _ in })
+        do { try await vault.login(server: .us, masterPassword: "synthetic-master", method: .authenticator, dialogue: dialogue); XCTFail("Expected failure") } catch { }
+        _ = try await vault.status()
+        let state = await vault.state
+        XCTAssertEqual(state, .lockFailed)
+    }
+
     func testLockPreemptsLoginWaitingForCode() async throws {
         let (vault, root) = try make()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -61,8 +105,8 @@ final class AccountConnectionTests: XCTestCase {
         try await vault.lock()
         do { try await task.value; XCTFail("Late login must fail") } catch { }
         let state = await vault.state
-        XCTAssertEqual(state, .locked)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("lock-called").path))
+        XCTAssertEqual(state, .unauthenticated)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("lock-called").path))
     }
 }
 
