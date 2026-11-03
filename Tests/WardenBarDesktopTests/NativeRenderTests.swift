@@ -69,6 +69,17 @@ final class NativeRenderTests: XCTestCase {
         await store.sync()
         store.folderFilter = .folder("folder")
         try await render(store, name: "long-list", dark: false, width: PopoverWidth.minimum)
+        store.folderFilter = .all
+        await backend.useMixedRecords()
+        await store.sync()
+        try await render(store, name: "mixed-narrow", dark: false, width: PopoverWidth.minimum)
+        store.typeFilter = .card
+        try await render(store, name: "card-filter", dark: true, width: PopoverWidth.minimum)
+        store.typeFilter = nil
+        for id in ["card", "identity", "note", "ssh"] {
+            store.select(id)
+            try await render(store, name: "detail-" + id, dark: id == "ssh" || id == "card", width: PopoverWidth.minimum)
+        }
         await store.lock().value
     }
 

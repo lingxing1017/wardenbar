@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import WardenBarDesktop
+import WardenBarCore
 
 @MainActor
 struct VaultPopoverView: View {
@@ -39,7 +40,8 @@ struct VaultPopoverView: View {
                         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                     case .setup: setup
                     case .unlocked:
-                        if let item = store.selectedItem { ItemDetailView(store: store, item: item) }
+                        if let item = store.selectedItem { ItemDetailView(store: store, item: item)
+                            .id("\(store.generation):\(store.indexRevision):\(item.id)") }
                         else { VaultListView(store: store) }
                     }
                 }
@@ -118,7 +120,7 @@ struct VaultPopoverView: View {
             if let activity = store.activityMessage { Text(activity).foregroundStyle(.primary) }
             else if let notice = store.notice { Text(notice).foregroundStyle(.primary) }
             else if store.phase == .unlocked {
-                Text(store.lastSync.map { "已同步 " + $0.formatted(date: .omitted, time: .shortened) } ?? "本地密码库 · \(store.items.count) 条登录")
+                Text(store.lastSync.map { "已同步 " + $0.formatted(date: .omitted, time: .shortened) } ?? "本地密码库 · \(store.items.count) 条记录")
             } else { Text(store.phase == .lockFailed ? "后端锁定待重试" : "密码库访问受保护") }
             HStack(spacing: 4) {
                 if store.phase == .unlocked {
@@ -153,7 +155,7 @@ private struct VaultListView: View {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                    TextField("搜索名称、用户名或网址", text: $store.query)
+                    TextField("搜索名称或条目信息", text: $store.query)
                         .textFieldStyle(.plain).focused($searchFocused)
                         .onSubmit { store.select(cursorID ?? store.filteredItems.first?.id) }
                         .accessibilityIdentifier("vaultSearch")
@@ -166,22 +168,31 @@ private struct VaultListView: View {
                             Text(folder.name).lineLimit(1).truncationMode(.middle).tag(FolderFilter.folder(folder.id))
                         }
                     }.labelsHidden().pickerStyle(.menu)
-                        .frame(maxWidth: 220, alignment: .leading)
+                        .frame(maxWidth: 140, alignment: .leading)
                         .fixedSize(horizontal: true, vertical: false)
                         .accessibilityLabel("文件夹")
+                    Picker("类型", selection: $store.typeFilter) {
+                        Text("全部类型").tag(Optional<VaultItemType>.none)
+                        ForEach(VaultItemType.displayOrder) { type in
+                            Text(type.title).tag(Optional(type))
+                        }
+                    }.labelsHidden().pickerStyle(.menu)
+                        .frame(maxWidth: 100, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityLabel("类型")
                     Spacer(minLength: 0)
                 }
             }.padding(12)
             if store.isWorking && store.items.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text(store.activityMessage ?? "正在读取登录条目…").foregroundStyle(.secondary)
+                    Text(store.activityMessage ?? "正在读取记录…").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.filteredItems.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").font(.title).foregroundStyle(.secondary).accessibilityHidden(true)
-                    Text(store.items.isEmpty ? "没有可显示的登录条目" : "未找到匹配项").font(.headline)
-                    Text(store.items.isEmpty ? "当前支持普通个人登录条目。" : "试试其他文件夹或搜索词。")
+                    Text(store.items.isEmpty ? "没有可显示的记录" : "未找到匹配项").font(.headline)
+                    Text(store.items.isEmpty ? "支持个人登录、支付卡、身份、笔记和 SSH 密钥。" : "试试其他类型、文件夹或搜索词。")
                         .font(.callout).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -189,10 +200,12 @@ private struct VaultListView: View {
                     ForEach(store.filteredItems) { item in
                         HStack(spacing: 6) {
                             Button { store.select(item.id) } label: {
-                                HStack(spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: item.type.symbol)
+                                        .foregroundStyle(.secondary).frame(width: 18).accessibilityLabel(item.type.title)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(item.name).font(.body.weight(.medium)).lineLimit(1)
-                                        Text(item.username?.isEmpty == false ? item.username! : (item.uris.first ?? "登录条目"))
+                                        Text(item.subtitle?.isEmpty == false ? item.subtitle! : (item.username ?? item.uris.first ?? item.type.title))
                                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                     Spacer(minLength: 0)
@@ -200,34 +213,41 @@ private struct VaultListView: View {
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             HStack(spacing: 2) {
-                                Button { store.copyUsername(for: item.id) } label: {
-                                    Label("复制用户名", systemImage: "person")
-                                        .frame(width: 26, height: 28).contentShape(Rectangle())
-                                }.disabled(store.isWorking || item.username?.isEmpty != false).help("复制用户名")
-                                Button { copyPassword(item.id) } label: {
-                                    Label("复制密码", systemImage: "key.horizontal")
-                                        .frame(width: 26, height: 28).contentShape(Rectangle())
-                                }.disabled(store.isWorking || !item.hasPassword).help("复制密码")
-                                Button { copyTOTP(item.id) } label: {
-                                    Label("复制动态验证码", systemImage: "clock")
-                                        .frame(width: 26, height: 28).contentShape(Rectangle())
-                                }.disabled(store.isWorking || !item.hasTOTP).help(item.hasTOTP ? "复制动态验证码" : "未配置动态验证码")
+                                if item.type == .login {
+                                    Button { store.copyUsername(for: item.id) } label: {
+                                        Label("复制用户名", systemImage: "person")
+                                            .frame(width: 26, height: 28).contentShape(Rectangle())
+                                    }.disabled(store.isWorking || item.username?.isEmpty != false).help("复制用户名")
+                                    Button { copyPassword(item.id) } label: {
+                                        Label("复制密码", systemImage: "key.horizontal")
+                                            .frame(width: 26, height: 28).contentShape(Rectangle())
+                                    }.disabled(store.isWorking || !item.hasPassword).help("复制密码")
+                                    Button { copyTOTP(item.id) } label: {
+                                        Label("复制动态验证码", systemImage: "clock")
+                                            .frame(width: 26, height: 28).contentShape(Rectangle())
+                                    }.disabled(store.isWorking || !item.hasTOTP).help(item.hasTOTP ? "复制动态验证码" : "未配置动态验证码")
+                                } else if item.primaryCopyField != nil {
+                                    Button { copyPrimary(item) } label: {
+                                        Label(item.type.copyLabel, systemImage: "doc.on.doc")
+                                            .frame(width: 26, height: 28).contentShape(Rectangle())
+                                    }.disabled(store.isWorking).help(item.type.copyLabel)
+                                }
                             }.labelStyle(.iconOnly).buttonStyle(.borderless).fixedSize()
                         }.padding(.vertical, 7).tag(item.id)
                     }
                 }.listStyle(.inset).scrollContentBackground(.hidden)
                 HStack {
-                    Text("\(store.filteredItems.count) 条登录").font(.caption).foregroundStyle(.secondary)
+                    Text("\(store.filteredItems.count) 条记录").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                 }.padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
         .background {
             // Keep the keyboard command without a duplicate visible action or an implicit first-row target.
-            Button("复制选中条目的密码") {
-                if let id = cursorID { copyPassword(id) }
+            Button("复制选中记录的主要字段") {
+                if let item = store.filteredItems.first(where: { $0.id == cursorID }) { copyPrimary(item) }
             }.keyboardShortcut("2", modifiers: .command)
-                .disabled(store.isWorking || store.filteredItems.first(where: { $0.id == cursorID })?.hasPassword != true)
+                .disabled(store.isWorking || store.filteredItems.first(where: { $0.id == cursorID })?.primaryCopyField == nil)
                 .hidden().accessibilityHidden(true)
         }
         .onAppear { searchFocused = true }
@@ -247,6 +267,12 @@ private struct VaultListView: View {
             if direction == .up { cursorID = ids[max(current - 1, 0)] }
             store.userDidInteract()
         }
+    }
+
+    private func copyPrimary(_ item: VaultItemSummary) {
+        guard let fieldID = item.primaryCopyField else { return }
+        let generation = store.generation
+        Task { await store.copyField(for: item.id, fieldID: fieldID, expectedGeneration: generation) }
     }
 
     private func copyPassword(_ id: String) {
