@@ -38,7 +38,7 @@ def item(identifier=item_id, **extra):
         "revisionDate": "2026-01-01T00:00:00Z", "deletedDate": None,
         "notes": "synthetic-note-do-not-retain", "fields": [], "collectionIds": [],
         "login": {"username": "synthetic-user", "password": "\n secret\t \n",
-                  "totp": "synthetic-seed-do-not-retain", "uris": [{"uri": "https://example.invalid", "match": None}]}
+                  "totp": "steam://synthetic-seed-do-not-retain" if (root / "steam-totp").exists() else "synthetic-seed-do-not-retain", "uris": [{"uri": "https://example.invalid", "match": None}]}
     }
     value.update(extra)
     return value
@@ -80,7 +80,7 @@ else:
         print(json.dumps([{"id": None, "name": "No Folder"}, {"name": "No Folder"}, {"id": "66666666-6666-6666-6666-666666666666", "name": "Synthetic folder"}]))
     elif args == ["get", "totp", item_id]:
         delay("totp")
-        print("synthetic-invalid-code" if (root / "invalid-totp").exists() else "123456")
+        print("synthetic-invalid-code" if (root / "invalid-totp").exists() else ("BC2DF" if (root / "steam-totp").exists() else "123456"))
     elif args == ["get", "item", item_id]:
         delay("read")
         print(json.dumps(item(reprompt=1 if (root / "protected-read").exists() else 0)))
