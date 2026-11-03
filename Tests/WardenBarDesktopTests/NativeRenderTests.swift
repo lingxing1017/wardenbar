@@ -60,6 +60,7 @@ final class NativeRenderTests: XCTestCase {
         try await render(store, name: "system-only", dark: true, width: PopoverWidth.minimum, policy: .systemOnly)
         let settings = AutoLockSettingsView(policy: .constant(.idle(minutes: 17)), onClose: {}, onInteract: {})
             .frame(width: 280, height: 420)
+            .background(Color(nsColor: .windowBackgroundColor))
         try await renderView(settings, name: "lock-settings", dark: false, width: 280, height: 420)
         store.select("one")
         try await render(store, name: "detail-dark", dark: true)

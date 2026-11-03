@@ -26,28 +26,28 @@ struct VaultPopoverView: View {
                 if showsLockSettings {
                     AutoLockSettingsView(policy: $lockPolicy, onClose: { showsLockSettings = false; store.userDidInteract() }, onInteract: { store.userDidInteract() })
                 } else {
-                switch store.phase {
-                case .checking: progress("正在检查密码库…")
-                case .locked, .unlocking: UnlockView(store: store)
-                case .locking: progress("本地访问已阻止，正在锁定后端…")
-                case .lockFailed:
-                    VStack(spacing: 16) {
-                        Image(systemName: "exclamationmark.shield").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("访问已阻止").font(.title2.weight(.semibold))
-                        Text("后端锁定尚未完成，请重试。").foregroundStyle(.secondary)
-                        Button("重试锁定") { store.lock() }.buttonStyle(.borderedProminent)
-                    }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .setup: setup
-                case .unlocked:
-                    if let item = store.selectedItem { ItemDetailView(store: store, item: item) }
-                    else { VaultListView(store: store) }
-                }
+                    switch store.phase {
+                    case .checking: progress("正在检查密码库…")
+                    case .locked, .unlocking: UnlockView(store: store)
+                    case .locking: progress("本地访问已阻止，正在锁定后端…")
+                    case .lockFailed:
+                        VStack(spacing: 16) {
+                            Image(systemName: "exclamationmark.shield").font(.largeTitle).foregroundStyle(.secondary)
+                            Text("访问已阻止").font(.title2.weight(.semibold))
+                            Text("后端锁定尚未完成，请重试。").foregroundStyle(.secondary)
+                            Button("重试锁定") { store.lock() }.buttonStyle(.borderedProminent)
+                        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    case .setup: setup
+                    case .unlocked:
+                        if let item = store.selectedItem { ItemDetailView(store: store, item: item) }
+                        else { VaultListView(store: store) }
+                    }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             footer
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.regularMaterial)
         .onAppear { store.userDidInteract() }
         .onExitCommand {
             if showsLockSettings { showsLockSettings = false; store.userDidInteract() }
@@ -59,25 +59,28 @@ struct VaultPopoverView: View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield.fill").foregroundStyle(.tint).accessibilityHidden(true)
             Text("WardenBar").font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
             Spacer()
-            if store.isWorking || store.isRefreshingFolders { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
-            Button {
-                let generation = store.generation
-                Task { await store.sync(expectedGeneration: generation) }
-            } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
-                .labelStyle(.iconOnly).help("同步密码库")
-                .disabled(store.phase != .unlocked || store.isWorking || store.isRefreshingFolders)
-            Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
-                .labelStyle(.iconOnly).help("锁定密码库")
-                .disabled(![.unlocked, .unlocking, .lockFailed].contains(store.phase))
-            Menu {
-                Button("自动锁定…") { showsLockSettings = true; store.userDidInteract() }
-                Divider()
-                Button("打开密码库目录") { NSWorkspace.shared.open(dataDirectory) }
-                Divider()
-                Button("退出 WardenBar") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
-            } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("更多操作") }
-            .menuStyle(.borderlessButton).fixedSize()
+            HStack(spacing: 8) {
+                if store.isWorking || store.isRefreshingFolders { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
+                Button {
+                    let generation = store.generation
+                    Task { await store.sync(expectedGeneration: generation) }
+                } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
+                    .labelStyle(.iconOnly).help("同步密码库")
+                    .disabled(store.phase != .unlocked || store.isWorking || store.isRefreshingFolders)
+                Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
+                    .labelStyle(.iconOnly).help("锁定密码库")
+                    .disabled(![.unlocked, .unlocking, .lockFailed].contains(store.phase))
+                Menu {
+                    Button("自动锁定…") { showsLockSettings = true; store.userDidInteract() }
+                    Divider()
+                    Button("打开密码库目录") { NSWorkspace.shared.open(dataDirectory) }
+                    Divider()
+                    Button("退出 WardenBar") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
+                } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("更多操作") }
+                .menuStyle(.borderlessButton).fixedSize()
+            }.modifier(NativeToolbarSurface())
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 16).frame(height: 48)
@@ -212,7 +215,7 @@ private struct VaultListView: View {
                             }.labelStyle(.iconOnly).buttonStyle(.borderless).fixedSize()
                         }.padding(.vertical, 7).tag(item.id)
                     }
-                }.listStyle(.inset)
+                }.listStyle(.inset).scrollContentBackground(.hidden)
                 HStack {
                     Text("\(store.filteredItems.count) 条登录").font(.caption).foregroundStyle(.secondary)
                     Spacer()
