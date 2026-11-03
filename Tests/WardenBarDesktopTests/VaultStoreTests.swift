@@ -70,6 +70,24 @@ actor ControlledVault: VaultBackend {
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testCountdownUsesVaultActivityAndResetsOnInteraction() async {
+        var now: TimeInterval = 100
+        let board = NSPasteboard(name: .init("WardenBarCountdown-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board), clock: { now })
+        XCTAssertNil(store.secondsUntilLock(policy: .idle(minutes: 1)))
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        now = 115.5
+        XCTAssertEqual(store.secondsUntilLock(policy: .idle(minutes: 1)), 45)
+        store.query = "cafe"
+        XCTAssertEqual(store.secondsUntilLock(policy: .idle(minutes: 1)), 60)
+        XCTAssertNil(store.secondsUntilLock(policy: .systemOnly))
+        now = 1000
+        XCTAssertEqual(store.secondsUntilLock(policy: .idle(minutes: 1)), 0)
+        await store.lock().value
+        XCTAssertNil(store.secondsUntilLock(policy: .idle(minutes: 1)))
+    }
     func testCopiesAreUsableBeforeFoldersFinishButSyncWaits() async throws {
         let backend = ControlledVault()
         await backend.delayFolders()
