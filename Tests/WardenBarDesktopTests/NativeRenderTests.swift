@@ -5,7 +5,45 @@ import XCTest
 @testable import WardenBarDesktop
 
 @MainActor
+private final class WidthPreference: ObservableObject {
+    @Published var value: Double = 320
+}
+
+@MainActor
+private struct LiveWidthHarness: View {
+    @ObservedObject var preference: WidthPreference
+    let store: VaultStore
+    var body: some View {
+        ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: $preference.value)
+    }
+}
+
+@MainActor
 final class NativeRenderTests: XCTestCase {
+    func testLiveWidthChangesResizeThePanelInsteadOfClippingItsContent() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let board = NSPasteboard(name: .init("WardenBarLiveWidth-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board))
+        let preference = WidthPreference()
+        let panel = NSPanel(contentRect: NSRect(x: 100, y: 100, width: 320, height: 520), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: LiveWidthHarness(preference: preference, store: store))
+        // Reproduce a menu-bar host whose native frame does not automatically follow content.
+        host.sizingOptions = []
+        panel.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 320, height: 520)
+        let top = panel.frame.maxY
+        for width in [480.0, 280.0, 360.0] {
+            preference.value = width
+            try await Task.sleep(nanoseconds: 150_000_000)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(panel.contentRect(forFrameRect: panel.frame).width, CGFloat(width), accuracy: 0.5)
+            XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 0.5)
+            XCTAssertEqual(panel.frame.maxY, top, accuracy: 0.5)
+        }
+        panel.orderOut(nil)
+    }
+
     func testLockedListAndDetailRenderWithSyntheticData() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let board = NSPasteboard(name: .init("WardenBarRender-" + UUID().uuidString))
