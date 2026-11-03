@@ -32,8 +32,62 @@ final class CLIConfigurationTests: XCTestCase {
         let plain = directory.appendingPathComponent("plain")
         try Data().write(to: plain)
         let valid = try executable()
-        let result = try CLIConfiguration.discover(candidates: [directory, plain, valid])
+        let result = try CLIConfiguration.discover(searchPath: nil, candidates: [directory, plain, valid])
         XCTAssertEqual(result.executable, valid)
+    }
+
+    func testPathSearchPrecedesFallbackAndPreservesOrderAndSpaces() throws {
+        let first = directory.appendingPathComponent("first bin")
+        let second = directory.appendingPathComponent("second")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        for folder in [first, second] {
+            let file = folder.appendingPathComponent("bw")
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let fallback = try executable("fallback")
+        let path = first.path + ":" + second.path
+        let result = try CLIConfiguration.discover(searchPath: path, candidates: [fallback])
+        XCTAssertEqual(result.executable, first.appendingPathComponent("bw"))
+        let explicit = try CLIConfiguration.discover(executable: fallback, searchPath: path)
+        XCTAssertEqual(explicit.executable, fallback)
+        XCTAssertThrowsError(try CLIConfiguration.discover(executable: directory.appendingPathComponent("missing"), searchPath: path))
+    }
+
+    func testPathSearchSkipsInvalidEntriesAndFallsBack() throws {
+        let invalid = directory.appendingPathComponent("invalid")
+        try FileManager.default.createDirectory(at: invalid.appendingPathComponent("bw"), withIntermediateDirectories: true)
+        let plain = directory.appendingPathComponent("plain")
+        try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+        try Data().write(to: plain.appendingPathComponent("bw"))
+        let fallback = try executable("fallback")
+        for path: String? in [nil, "", ":.:relative:" + invalid.path + ":" + plain.path] {
+            let config = try CLIConfiguration.discover(searchPath: path, candidates: [fallback])
+            XCTAssertEqual(config.executable, fallback)
+        }
+        XCTAssertThrowsError(try CLIConfiguration.discover(searchPath: nil, candidates: []))
+    }
+
+    func testDiscoveredNodeScriptRunsWithItsPathInterpreter() async throws {
+        let bin = directory.appendingPathComponent("custom cli")
+        let runtime = directory.appendingPathComponent("custom runtime")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+        let bw = bin.appendingPathComponent("bw")
+        let node = runtime.appendingPathComponent("node")
+        try Data("#!/usr/bin/env node\n".utf8).write(to: bw)
+        try Data("#!/bin/sh\nprintf '2026.10.1\\n'\n".utf8).write(to: node)
+        for file in [bw, node] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let config = try CLIConfiguration.discover(dataDirectory: directory.appendingPathComponent("CLI"), searchPath: bin.path + ":" + runtime.path, candidates: [])
+        let vault = BitwardenVault(configuration: config)
+        let version = try await vault.version()
+        XCTAssertEqual(version, "2026.10.1")
+        let env = config.environment(parent: ["PATH": "/unrelated", "NODE_OPTIONS": "--require evil.js"])
+        XCTAssertNil(env["NODE_OPTIONS"])
+        XCTAssertFalse(env["PATH", default: ""].contains("unrelated"))
     }
 
     func testPrivateDirectoryIsCreatedAndExistingPermissionsAreRestricted() throws {
