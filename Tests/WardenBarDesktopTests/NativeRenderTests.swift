@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+import WardenBarCore
 @testable import WardenBarApp
 @testable import WardenBarDesktop
 
@@ -90,6 +91,32 @@ final class NativeRenderTests: XCTestCase {
             try await render(store, name: "detail-" + id, dark: id == "ssh" || id == "card", width: PopoverWidth.minimum)
         }
         await store.lock().value
+    }
+
+    func testFirstRunAndKnownChallengeFormsRenderWithSyntheticData() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        for challenge: CLILoginChallenge in [.twoFactor, .newDevice, .clientSecret] {
+            let board = NSPasteboard(name: .init("WardenBarOnboard-" + UUID().uuidString))
+            defer { board.releaseGlobally() }
+            let backend = ControlledVault()
+            await backend.useUnauthenticatedProfile()
+            await backend.requireLoginCode(challenge)
+            let store = VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board), cliExecutable: URL(fileURLWithPath: "/synthetic/bw"))
+            await store.start()
+            if challenge == .twoFactor {
+                try await render(store, name: "first-run-narrow", dark: false, width: PopoverWidth.minimum)
+                try await render(store, name: "first-run-dark", dark: true)
+            }
+            let signingIn = Task { await store.login(server: .us, email: "synthetic@example.invalid", masterPassword: "synthetic-master", method: .authenticator) }
+            for _ in 0..<100 {
+                if store.loginChallenge != nil { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            XCTAssertEqual(store.loginChallenge, challenge)
+            try await render(store, name: "first-run-" + String(describing: challenge), dark: true, width: PopoverWidth.minimum)
+            await store.lock().value
+            await signingIn.value
+        }
     }
 
     private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue, policy: AutoLockPolicy = .idle(minutes: 5)) async throws {
