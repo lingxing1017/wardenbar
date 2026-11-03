@@ -16,7 +16,7 @@ struct UnlockView: View {
                 .accessibilityHidden(true)
             VStack(spacing: 8) {
                 Text("密码库已锁定").font(.title2.weight(.semibold))
-                Text("输入主密码，访问你的登录条目。")
+                Text("输入主密码，访问你的密码库。")
                     .font(.callout).foregroundStyle(.secondary)
             }
             VStack(spacing: 12) {
