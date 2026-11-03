@@ -16,6 +16,7 @@ struct ResizableVaultPopover: View {
     var body: some View {
         VaultPopoverView(store: store, dataDirectory: dataDirectory, configurationIssue: configurationIssue)
             .frame(width: CGFloat(width), height: 520)
+            .background { PopoverWindowWidth(width: width).frame(width: 0, height: 0) }
             .overlay(alignment: .bottomTrailing) {
                 Image(systemName: "arrow.left.and.right")
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
