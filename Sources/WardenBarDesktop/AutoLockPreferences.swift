@@ -18,10 +18,12 @@ public enum AutoLockPolicy: Equatable, Sendable {
 
 @MainActor
 public final class AutoLockPreferences: ObservableObject {
-    @Published public var policy: AutoLockPolicy {
-        didSet {
-            policy = policy.normalized
-            defaults.set(Int(policy.timeout ?? 0), forKey: Self.key)
+    @Published private var storedPolicy: AutoLockPolicy
+    public var policy: AutoLockPolicy {
+        get { storedPolicy }
+        set {
+            storedPolicy = newValue.normalized
+            defaults.set(Int(storedPolicy.timeout ?? 0), forKey: Self.key)
         }
     }
     private let defaults: UserDefaults
@@ -31,9 +33,9 @@ public final class AutoLockPreferences: ObservableObject {
         self.defaults = defaults
         if let seconds = defaults.object(forKey: Self.key) as? Int,
            seconds >= 0, seconds <= 86400, seconds % 60 == 0 {
-            policy = seconds == 0 ? .systemOnly : .idle(minutes: seconds / 60)
+            storedPolicy = seconds == 0 ? .systemOnly : .idle(minutes: seconds / 60)
         } else {
-            policy = .idle(minutes: 5)
+            storedPolicy = .idle(minutes: 5)
         }
     }
 }
