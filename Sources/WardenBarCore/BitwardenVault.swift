@@ -89,7 +89,33 @@ public actor BitwardenVault {
         return items.map(\.summary)
     }
 
+    public func folders() async throws -> [VaultFolder] {
+        try requireReady()
+        let token = generation
+        let data = try await perform(["list", "folders"], authenticated: true)
+        guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
+        return try decode([VaultFolder].self, from: data).filter { UUID(uuidString: $0.id) != nil }
+    }
+
+    public func totp(for id: String) async throws -> SecretValue {
+        let token = generation
+        let item = try await detail(for: id)
+        guard item.metadata.summary.hasTOTP else { throw VaultError.itemUnavailable }
+        let data = try await perform(["get", "totp", id], authenticated: true)
+        guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
+        guard let text = String(data: data, encoding: .utf8) else { throw VaultError.invalidResponse }
+        let code = text.trimmingCharacters(in: .newlines)
+        guard code.range(of: #"^[0-9]{6,10}$"#, options: .regularExpression) != nil else { throw VaultError.invalidResponse }
+        return SecretValue(code)
+    }
+
     public func password(for id: String) async throws -> SecretValue {
+        let item = try await detail(for: id)
+        guard let password = item.password else { throw VaultError.itemUnavailable }
+        return SecretValue(password)
+    }
+
+    private func detail(for id: String) async throws -> WireItemDetail {
         try requireReady()
         guard authorizedIDs.contains(id), UUID(uuidString: id) != nil else { throw VaultError.itemUnavailable }
         let token = generation
@@ -97,11 +123,11 @@ public actor BitwardenVault {
         let data = try await perform(["get", "item", id], authenticated: true)
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
         let item = try decode(WireItemDetail.self, from: data)
-        guard item.metadata.id == id, item.metadata.isSupported, let password = item.password else {
+        guard item.metadata.id == id, item.metadata.isSupported else {
             authorizedIDs.remove(id)
             throw VaultError.itemUnavailable
         }
-        return SecretValue(password)
+        return item
     }
 
     public func sync() async throws {

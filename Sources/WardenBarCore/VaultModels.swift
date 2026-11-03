@@ -36,6 +36,13 @@ public struct VaultItemSummary: Sendable, Equatable, Identifiable {
     public let uris: [String]
     public let favorite: Bool
     public let folderID: String?
+    public var hasPassword: Bool = true
+    public var hasTOTP: Bool = false
+}
+
+public struct VaultFolder: Sendable, Equatable, Identifiable, Decodable {
+    public let id: String
+    public let name: String
 }
 
 struct WireItem: Decodable {
@@ -43,6 +50,8 @@ struct WireItem: Decodable {
         struct URI: Decodable { let uri: String? }
         let username: String?
         let uris: [URI]?
+        let password: String?
+        let totp: String?
     }
     let id: String
     let name: String
@@ -63,7 +72,9 @@ struct WireItem: Decodable {
         VaultItemSummary(
             id: id, name: name, username: login?.username,
             uris: login?.uris?.compactMap(\.uri) ?? [],
-            favorite: favorite ?? false, folderID: folderId
+            favorite: favorite ?? false, folderID: folderId,
+            hasPassword: login?.password?.isEmpty == false,
+            hasTOTP: login?.totp?.isEmpty == false
         )
     }
 }
