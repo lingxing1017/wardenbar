@@ -20,6 +20,6 @@ let package = Package(
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "WardenBarCheckTests", dependencies: ["WardenBarCheck", "WardenBarCore"]),
-        .testTarget(name: "WardenBarDesktopTests", dependencies: ["WardenBarDesktop", "WardenBarCore"])
+        .testTarget(name: "WardenBarDesktopTests", dependencies: ["WardenBarDesktop", "WardenBarCore", "WardenBarApp"])
     ]
 )
