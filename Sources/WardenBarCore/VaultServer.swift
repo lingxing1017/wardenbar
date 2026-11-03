@@ -2,7 +2,8 @@ import Foundation
 
 public struct VaultServer: Sendable, Equatable {
     public let url: URL
-    public static let us = try! VaultServer(address: "https://vault.bitwarden.com")
+    // The CLI uses this exact address to reset the US cloud environment.
+    public static let us = try! VaultServer(address: "https://bitwarden.com")
     public static let eu = try! VaultServer(address: "https://vault.bitwarden.eu")
 
     public init(address: String) throws {

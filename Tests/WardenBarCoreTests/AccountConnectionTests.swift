@@ -13,6 +13,7 @@ final class AccountConnectionTests: XCTestCase {
         return (BitwardenVault(configuration: config, readPolicy: .sessionSnapshot), root)
     }
     func testServerValidationPreservesSubpathsAndRejectsUnsafeURLs() throws {
+        XCTAssertEqual(VaultServer.us.url.absoluteString, "https://bitwarden.com")
         XCTAssertEqual(try VaultServer(address: "https://example.invalid/vault/").url.absoluteString, "https://example.invalid/vault")
         XCTAssertNoThrow(try VaultServer(address: "http://127.0.0.1:8080"))
         for value in ["http://example.invalid", "https://user:password@example.invalid", "https://example.invalid?a=b", "https://example.invalid/#x", "file:///tmp/a", "https://example.invalid/\npath"] {
