@@ -11,6 +11,8 @@ public final class VaultStore: ObservableObject {
     @Published public private(set) var items: [VaultItemSummary] = []
     @Published public private(set) var folders: [VaultFolder] = []
     @Published public var folderFilter: FolderFilter = .all { didSet { userDidInteract() } }
+    @Published public var typeFilter: VaultItemType? { didSet { userDidInteract() } }
+    @Published public private(set) var indexRevision: UInt64 = 0
     @Published public private(set) var activityMessage: String?
     @Published public private(set) var selectedID: String?
     @Published public private(set) var isWorking = false
@@ -39,7 +41,7 @@ public final class VaultStore: ObservableObject {
     public var filteredItems: [VaultItemSummary] {
         let words = query.split(whereSeparator: \.isWhitespace).map { String($0).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) }
         return items.filter { item in
-            let metadata = ([item.name, item.username ?? ""] + item.uris).joined(separator: " ")
+            let metadata = ([item.name, item.username ?? "", item.subtitle ?? ""] + item.uris).joined(separator: " ")
                 .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             let matchesFolder: Bool
             switch folderFilter {
@@ -47,7 +49,7 @@ public final class VaultStore: ObservableObject {
             case .unfiled: matchesFolder = item.folderID == nil
             case .folder(let id): matchesFolder = item.folderID == id
             }
-            return matchesFolder && (!favoritesOnly || item.favorite) && words.allSatisfy { metadata.contains($0) }
+            return (typeFilter == nil || item.type == typeFilter) && matchesFolder && (!favoritesOnly || item.favorite) && words.allSatisfy { metadata.contains($0) }
         }.sorted {
             if $0.favorite != $1.favorite { return $0.favorite }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
@@ -91,10 +93,11 @@ public final class VaultStore: ObservableObject {
             try await backend.unlock(masterPassword: masterPassword)
             guard generation == token, phase == .unlocking else { return }
             phase = .unlocked
-            activityMessage = "正在读取登录条目…"
+            activityMessage = "正在读取记录…"
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
+            indexRevision &+= 1
             isWorking = false
             activityMessage = nil
             releasedWork = true
@@ -117,6 +120,9 @@ public final class VaultStore: ObservableObject {
     public func sync(expectedGeneration: UInt64? = nil) async {
         if let expectedGeneration, expectedGeneration != generation { return }
         guard phase == .unlocked, !isWorking, !isRefreshingFolders, let backend else { return }
+        generation &+= 1
+        noticeTimer?.cancel()
+        notice = nil
         let token = generation
         isWorking = true
         activityMessage = "正在同步…"
@@ -130,6 +136,7 @@ public final class VaultStore: ObservableObject {
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
+            indexRevision &+= 1
             if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
             lastSync = Date()
             userDidInteract()
@@ -197,6 +204,42 @@ public final class VaultStore: ObservableObject {
         }
     }
 
+    public func details(for id: String, expectedGeneration: UInt64, expectedRevision: UInt64) async -> [VaultDetailField]? {
+        guard generation == expectedGeneration, indexRevision == expectedRevision,
+              phase == .unlocked, !isWorking, selectedID == id, let backend else { return nil }
+        do {
+            let fields = try await backend.details(for: id)
+            guard generation == expectedGeneration, indexRevision == expectedRevision,
+                  phase == .unlocked, selectedID == id else { return nil }
+            return fields
+        } catch {
+            guard generation == expectedGeneration, indexRevision == expectedRevision,
+                  phase == .unlocked, selectedID == id else { return nil }
+            errorMessage = "无法读取详情，请重试同步或重新解锁。"
+            return nil
+        }
+    }
+
+    public func copyField(for id: String, fieldID: String, expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
+        guard phase == .unlocked, !isWorking, items.contains(where: { $0.id == id }), let backend else { return }
+        let token = generation
+        let revision = indexRevision
+        isWorking = true
+        activityMessage = "正在复制…"
+        userDidInteract()
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
+        do {
+            let value = try await backend.fieldValue(for: id, fieldID: fieldID)
+            guard generation == token, indexRevision == revision, phase == .unlocked else { return }
+            try value.withValue { try clipboard.copy($0) }
+            showNotice("字段已复制")
+        } catch {
+            guard generation == token else { return }
+            errorMessage = "无法复制此字段，请重试同步或重新解锁。"
+        }
+    }
+
     private func loadFolders(_ backend: any VaultBackend, token: UInt64) async {
         isRefreshingFolders = true
         activityMessage = "正在读取文件夹…"
@@ -213,7 +256,7 @@ public final class VaultStore: ObservableObject {
             if case .folder(let id) = folderFilter, !folders.contains(where: { $0.id == id }) { folderFilter = .all }
         } catch {
             guard generation == token, phase == .unlocked else { return }
-            errorMessage = "文件夹读取失败，仍可搜索登录条目。请重试同步。"
+            errorMessage = "文件夹读取失败，仍可搜索记录。请重试同步。"
         }
     }
 
@@ -227,6 +270,7 @@ public final class VaultStore: ObservableObject {
         items.removeAll()
         folders.removeAll()
         folderFilter = .all
+        typeFilter = nil
         selectedID = nil
         query = ""
         isWorking = false
