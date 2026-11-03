@@ -211,7 +211,7 @@ private struct VaultListView: View {
                                     Spacer(minLength: 0)
                                     if item.favorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("已收藏") }
                                 }.contentShape(Rectangle())
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.plain).disabled(store.isWorking)
                             HStack(spacing: 2) {
                                 if item.type == .login {
                                     Button { store.copyUsername(for: item.id) } label: {
