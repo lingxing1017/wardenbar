@@ -24,7 +24,7 @@ Official CLI backend with an independent local authentication/data directory. Fi
 
 ## Capabilities and Constraints
 
-This milestone covers personal login items, metadata search, username/password copy, manual sync/lock, clipboard clearing and automatic lock. No server writes, biometric unlock, TOTP or global shortcut yet. Master password and Session are never persisted or logged. Raw CLI output is never exposed as an error.
+This milestone covers personal login items, metadata search, folder filtering, direct username/password/authenticator-code copy, manual sync/lock, clipboard clearing and automatic lock. Favorites filter existing Bitwarden stars; the app does not edit them. No server writes, biometric unlock or global shortcut yet. Master password and Session are never persisted or logged. Authenticator seeds stay out of the metadata index. Raw CLI output is never exposed as an error.
 
 ## Brand Commitments
 
