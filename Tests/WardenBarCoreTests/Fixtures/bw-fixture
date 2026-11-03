@@ -23,6 +23,8 @@ if not args or args[-1] != "--nointeraction":
     fail()
 args = args[:-1]
 command = args[0]
+with (root / "commands").open("a") as commands:
+    commands.write(" ".join(args[:2]) + "\n")
 if command != "unlock" and "BW_UNLOCK_PASSWORD" in os.environ:
     fail()
 
@@ -41,6 +43,11 @@ def item(identifier=item_id, **extra):
                   "totp": "steam://synthetic-seed-do-not-retain" if (root / "steam-totp").exists() else "synthetic-seed-do-not-retain", "uris": [{"uri": "https://example.invalid", "match": None}]}
     }
     value.update(extra)
+    if (root / "snapshot-data").exists():
+        if value.get("login") is not None:
+            value["login"]["totp"] = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    if (root / "changed-password").exists() and value.get("login") is not None:
+        value["login"]["password"] = "new-synthetic-password"
     return value
 
 if args == ["--version"]:
@@ -48,7 +55,7 @@ if args == ["--version"]:
 elif args == ["status"]:
     print(json.dumps({"serverUrl": "https://example.invalid", "lastSync": None,
                       "userEmail": "synthetic@example.invalid", "userId": item_id,
-                      "status": "unauthenticated" if (root / "unauthenticated-status").exists()
+                      "status": "locked" if (root / "forced-locked-status").exists() else "unauthenticated" if (root / "unauthenticated-status").exists()
                       else ("unlocked" if os.environ.get("BW_SESSION") == session else "locked")}))
 elif args == ["unlock", "--passwordenv", "BW_UNLOCK_PASSWORD", "--raw"]:
     if os.environ.get("BW_UNLOCK_PASSWORD") != "synthetic-master" or "BW_SESSION" in os.environ:
@@ -71,17 +78,22 @@ else:
             print("[]")
         else:
             print(json.dumps([
-                item(), item("22222222-2222-2222-2222-222222222222", reprompt=1),
+                item(reprompt=1 if (root / "protected-list").exists() else 0), item("22222222-2222-2222-2222-222222222222", reprompt=1),
                 item("33333333-3333-3333-3333-333333333333", organizationId="synthetic-org"),
                 item("44444444-4444-4444-4444-444444444444", type=2, login=None),
                 item("55555555-5555-5555-5555-555555555555", deletedDate="2026-01-01T00:00:00Z")
             ]))
     elif args == ["list", "folders"]:
+        delay("folders")
         print(json.dumps([{"id": None, "name": "No Folder"}, {"name": "No Folder"}, {"id": "66666666-6666-6666-6666-666666666666", "name": "Synthetic folder"}]))
     elif args == ["get", "totp", item_id]:
+        if (root / "reject-get").exists():
+            fail(9)
         delay("totp")
         print("synthetic-invalid-code" if (root / "invalid-totp").exists() else ("BC2DF" if (root / "steam-totp").exists() else "123456"))
     elif args == ["get", "item", item_id]:
+        if (root / "reject-get").exists():
+            fail(9)
         delay("read")
         print(json.dumps(item(reprompt=1 if (root / "protected-read").exists() else 0)))
     elif args == ["sync"]:
