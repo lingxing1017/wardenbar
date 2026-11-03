@@ -14,6 +14,7 @@ actor ControlledVault: VaultBackend {
     private var authenticated = true
     private var pauseLogin = false
     private var requestCode = false
+    private var requestedChallenge = CLILoginChallenge.twoFactor
     private var failLogin = false
     private var loginWait: CheckedContinuation<Void, Never>?
     private var failVersion = false
@@ -48,7 +49,7 @@ actor ControlledVault: VaultBackend {
     func useUnauthenticatedProfile() { authenticated = false; state = .unauthenticated }
     func delayLogin() { pauseLogin = true; loginStarted = false }
     func resumeLogin() { loginWait?.resume(); loginWait = nil }
-    func requireLoginCode() { requestCode = true }
+    func requireLoginCode(_ challenge: CLILoginChallenge = .twoFactor) { requestCode = true; requestedChallenge = challenge }
     func rejectLogin() { failLogin = true }
     func login(server: VaultServer, masterPassword: String, method: CLITwoFactorMethod, dialogue: CLILoginDialogue) async throws {
         loginStarted = true
@@ -56,7 +57,13 @@ actor ControlledVault: VaultBackend {
         if pauseLogin { await withCheckedContinuation { loginWait = $0 } }
         guard state == .unlocking else { throw VaultError.sessionChanged }
         if requestCode {
-            try dialogue.receiveStderr(Data("Two-step login code:".utf8))
+            let prompt: String
+            switch requestedChallenge {
+            case .twoFactor: prompt = "Two-step login code:"
+            case .newDevice: prompt = "New device verification required. Enter OTP sent to login email:"
+            case .clientSecret: prompt = "API key client_secret:"
+            }
+            try dialogue.receiveStderr(Data(prompt.utf8))
             let deadline = Date().addingTimeInterval(3)
             while dialogue.nextInput() == nil {
                 guard state == .unlocking, Date() < deadline else { throw VaultError.sessionChanged }

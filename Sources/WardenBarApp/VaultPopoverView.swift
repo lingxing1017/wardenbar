@@ -93,7 +93,7 @@ struct VaultPopoverView: View {
                     .disabled(store.phase != .unlocked || store.isWorking || store.isRefreshingFolders)
                 Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
                     .labelStyle(.iconOnly).help("锁定密码库")
-                    .disabled(![.unlocked, .unlocking, .lockFailed].contains(store.phase))
+                    .disabled(![.unlocked, .unlocking, .signingIn, .lockFailed].contains(store.phase))
                 Menu {
                     Button("自动锁定…") { showsLockSettings = true; store.userDidInteract() }
                     Divider()
@@ -119,20 +119,25 @@ struct VaultPopoverView: View {
         }.padding(12).background(Color(nsColor: .controlBackgroundColor))
     }
 
+    @ViewBuilder
     private var setup: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "externaldrive").font(.largeTitle).foregroundStyle(.secondary)
-            Text("连接密码库").font(.title2.weight(.semibold))
-            Text(configurationIssue == nil ? "先为独立目录完成 CLI 登录，之后即可在这里解锁。" : "修复本地配置后，请重新打开应用。")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Text(dataDirectory.path).font(.caption).textSelection(.enabled).multilineTextAlignment(.center)
-            if configurationIssue == nil {
-                Button("重新检查") { Task { await store.start() } }.buttonStyle(.borderedProminent)
-            } else {
-                Button("退出应用") { NSApp.terminate(nil) }.buttonStyle(.borderedProminent)
-            }
-            Button("打开目录") { NSWorkspace.shared.open(dataDirectory) }.buttonStyle(.borderless)
-        }.padding(28).frame(maxHeight: .infinity)
+        if configurationIssue == nil && (store.requiresLogin || store.phase == .signingIn) {
+            AccountSetupView(store: store, dataDirectory: dataDirectory)
+        } else {
+            VStack(spacing: 16) {
+                Image(systemName: "externaldrive").font(.largeTitle).foregroundStyle(.secondary)
+                Text("连接密码库").font(.title2.weight(.semibold))
+                Text(configurationIssue == nil ? "先为独立目录完成 CLI 登录，之后即可在这里解锁。" : "修复本地配置后，请重新打开应用。")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
+                Text(dataDirectory.path).font(.caption).textSelection(.enabled).multilineTextAlignment(.center)
+                if configurationIssue == nil {
+                    Button("重新检查") { Task { await store.start() } }.buttonStyle(.borderedProminent)
+                } else {
+                    Button("退出应用") { NSApp.terminate(nil) }.buttonStyle(.borderedProminent)
+                }
+                Button("打开目录") { NSWorkspace.shared.open(dataDirectory) }.buttonStyle(.borderless)
+            }.padding(28).frame(maxHeight: .infinity)
+        }
     }
 
     private var footer: some View {
