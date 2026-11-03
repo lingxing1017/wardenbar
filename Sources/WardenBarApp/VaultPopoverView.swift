@@ -38,7 +38,7 @@ struct VaultPopoverView: View {
                             Text("后端锁定尚未完成，请重试。").foregroundStyle(.secondary)
                             Button("重试锁定") { store.lock() }.buttonStyle(.borderedProminent)
                         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    case .setup: setup
+                    case .setup, .signingIn: setup
                     case .unlocked:
                         ZStack {
                             // Keep the native list and its exact scroll offset alive during details.

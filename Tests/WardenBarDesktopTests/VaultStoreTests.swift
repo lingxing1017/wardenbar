@@ -10,7 +10,15 @@ actor ControlledVault: VaultBackend {
     var syncCalls = 0
     var versionCalls = 0
     var statusCalls = 0
+    var loginStarted = false
+    private var authenticated = true
+    private var pauseLogin = false
+    private var requestCode = false
+    private var failLogin = false
+    private var loginWait: CheckedContinuation<Void, Never>?
     private var failVersion = false
+    private var pauseVersion = false
+    private var versionWait: CheckedContinuation<Void, Never>?
     private var pauseUnlock = false
     private var pauseRead = false
     private var failLock = false
@@ -27,13 +35,38 @@ actor ControlledVault: VaultBackend {
         VaultItemSummary(id: "two", name: "Mail", username: "bob", uris: ["https://mail.invalid"], favorite: false, folderID: nil)
     ]
 
-    func version() throws -> String {
+    func pauseNextVersion() { pauseVersion = true }
+    func resumeVersion() { versionWait?.resume(); versionWait = nil }
+    func version() async throws -> String {
         versionCalls += 1
+        if pauseVersion { pauseVersion = false; await withCheckedContinuation { versionWait = $0 } }
         if failVersion { throw CLIProcessError.nonzeroExit(1) }
         return "2026.10.1"
     }
     func rejectVersion(_ value: Bool) { failVersion = value }
-    func status() -> CLIStatus { statusCalls += 1; return state == .unlocked ? .unlocked : .locked }
+    func status() -> CLIStatus { statusCalls += 1; return authenticated ? (state == .unlocked ? .unlocked : .locked) : .unauthenticated }
+    func useUnauthenticatedProfile() { authenticated = false; state = .unauthenticated }
+    func delayLogin() { pauseLogin = true; loginStarted = false }
+    func resumeLogin() { loginWait?.resume(); loginWait = nil }
+    func requireLoginCode() { requestCode = true }
+    func rejectLogin() { failLogin = true }
+    func login(server: VaultServer, masterPassword: String, method: CLITwoFactorMethod, dialogue: CLILoginDialogue) async throws {
+        loginStarted = true
+        state = .unlocking
+        if pauseLogin { await withCheckedContinuation { loginWait = $0 } }
+        guard state == .unlocking else { throw VaultError.sessionChanged }
+        if requestCode {
+            try dialogue.receiveStderr(Data("Two-step login code:".utf8))
+            let deadline = Date().addingTimeInterval(3)
+            while dialogue.nextInput() == nil {
+                guard state == .unlocking, Date() < deadline else { throw VaultError.sessionChanged }
+                try await Task.sleep(nanoseconds: 5_000_000)
+            }
+        }
+        if failLogin { state = .unauthenticated; throw CLIProcessError.nonzeroExit(1) }
+        authenticated = true
+        state = .unlocked
+    }
     func unlock(masterPassword: String) async throws {
         guard masterPassword == "synthetic-master" else { throw CLIProcessError.nonzeroExit(1) }
         state = .unlocked
@@ -109,6 +142,82 @@ actor ControlledVault: VaultBackend {
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testStartupDoesNotRunConcurrentChecks() async throws {
+        let backend = ControlledVault()
+        await backend.pauseNextVersion()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        let initial = Task { await store.start() }
+        try await waitFor { await backend.versionCalls == 1 }
+        await store.start()
+        await backend.resumeVersion()
+        await initial.value
+        let calls = await backend.versionCalls
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(store.isWorking)
+    }
+
+    func testFirstRunLoginCanSubmitChallengeAndEnterVault() async throws {
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        await backend.requireLoginCode()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        XCTAssertTrue(store.requiresLogin)
+        let signingIn = Task { await store.login(server: .us, email: "synthetic@example.invalid", masterPassword: "synthetic-master", method: .authenticator) }
+        try await waitFor { store.loginChallenge == .twoFactor }
+        XCTAssertEqual(store.phase, .signingIn)
+        store.submitLoginResponse("123456")
+        await signingIn.value
+        XCTAssertEqual(store.phase, .unlocked)
+        XCTAssertFalse(store.requiresLogin)
+        XCTAssertNil(store.loginChallenge)
+        XCTAssertEqual(store.items.count, 2)
+        await store.lock().value
+    }
+
+    func testLoginLockDiscardsLateCompletionAndReturnsToFirstRun() async throws {
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        await backend.delayLogin()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        let signingIn = Task { await store.login(server: .us, email: "synthetic@example.invalid", masterPassword: "synthetic-master", method: .authenticator) }
+        try await waitFor { await backend.loginStarted }
+        await store.lock().value
+        await backend.resumeLogin()
+        await signingIn.value
+        XCTAssertEqual(store.phase, .setup)
+        XCTAssertTrue(store.requiresLogin)
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertNil(store.loginChallenge)
+    }
+
+    func testFailedLoginShowsSafeRetryAndLockFailureRemainsBlocked() async throws {
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        await backend.rejectLogin()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.login(server: .us, email: "synthetic@example.invalid", masterPassword: "synthetic-master", method: .authenticator)
+        XCTAssertEqual(store.phase, .setup)
+        XCTAssertTrue(store.requiresLogin)
+        XCTAssertFalse(store.isWorking)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertFalse(store.errorMessage?.contains("nonzeroExit") ?? false)
+        await backend.delayLogin()
+        let signingIn = Task { await store.login(server: .us, email: "synthetic@example.invalid", masterPassword: "synthetic-master", method: .authenticator) }
+        try await waitFor { await backend.loginStarted }
+        await backend.rejectLock()
+        await store.lock().value
+        await backend.resumeLogin()
+        await signingIn.value
+        XCTAssertEqual(store.phase, .lockFailed)
+    }
+
     func testStartupValidatesCLIBeforeReadingStatusAndCanRetry() async {
         let backend = ControlledVault()
         await backend.rejectVersion(true)
