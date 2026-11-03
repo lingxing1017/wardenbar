@@ -48,6 +48,23 @@ actor ControlledVault: VaultBackend {
         if pauseRead { await withCheckedContinuation { readWait = $0 } }
         return SecretValue("synthetic-password")
     }
+    func details(for id: String) async throws -> [VaultDetailField] {
+        _ = try await password(for: id)
+        let kind = records.first(where: { $0.id == id })?.type ?? .login
+        let values: [(String, String, String, Bool)]
+        switch kind {
+        case .card: values = [("card.number", "卡号", "4111111111111111", true), ("card.code", "安全码", "987", true)]
+        case .identity: values = [("identity.email", "电子邮箱", "synthetic@example.invalid", false), ("identity.ssn", "社会保障号码", "synthetic-ssn", true)]
+        case .secureNote: values = [("notes", "笔记", " synthetic note\nsecond line\n", true)]
+        case .sshKey: values = [("ssh.publicKey", "公钥", "ssh-ed25519 synthetic", false), ("ssh.privateKey", "私钥", "\nPRIVATE synthetic\nKEY\n", true)]
+        case .login: values = [("login.username", "用户名", "alice", false), ("login.password", "密码", "synthetic-password", true), ("custom:0", "PIN", " synthetic-pin ", true)]
+        }
+        return values.map { VaultDetailField(id: $0.0, label: $0.1, value: SecretValue($0.2), concealed: $0.3, multiline: kind == .secureNote || kind == .sshKey) }
+    }
+    func fieldValue(for id: String, fieldID: String) async throws -> SecretValue {
+        guard let value = try await details(for: id).first(where: { $0.id == fieldID })?.value else { throw VaultError.itemUnavailable }
+        return value
+    }
     func sync() throws { syncCalls += 1; if failSync { throw CLIProcessError.nonzeroExit(8) } }
     func lock() throws {
         state = failLock ? .lockFailed : .locked
@@ -66,10 +83,84 @@ actor ControlledVault: VaultBackend {
         folderName = "A very long folder name that must fit inside the compact folder control"
         records = [VaultItemSummary(id: "one", name: "A very long login name that must truncate before the copy actions", username: "long-account-name@example.invalid", uris: [], favorite: true, folderID: "folder", hasTOTP: true)]
     }
+    func useMixedRecords() {
+        records += [
+            VaultItemSummary(id: "card", name: "Synthetic Visa", username: nil, uris: [], favorite: false, folderID: "folder", hasPassword: false, type: .card, subtitle: "Visa · ••••1111", primaryFieldID: "card.number"),
+            VaultItemSummary(id: "identity", name: "Synthetic identity", username: nil, uris: [], favorite: false, folderID: nil, hasPassword: false, type: .identity, subtitle: "synthetic@example.invalid", primaryFieldID: "identity.email"),
+            VaultItemSummary(id: "note", name: "Synthetic note", username: nil, uris: [], favorite: false, folderID: nil, hasPassword: false, type: .secureNote, primaryFieldID: "notes"),
+            VaultItemSummary(id: "ssh", name: "Synthetic SSH", username: nil, uris: [], favorite: false, folderID: nil, hasPassword: false, type: .sshKey, subtitle: "SHA256:synthetic", primaryFieldID: "ssh.publicKey")
+        ]
+    }
 }
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testTypesIntersectFolderAndMetadataSearchAndResetOnLock() async {
+        let backend = ControlledVault()
+        await backend.useMixedRecords()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        store.typeFilter = .card
+        store.query = "Visa 1111"
+        XCTAssertEqual(store.filteredItems.map(\.id), ["card"])
+        store.folderFilter = .unfiled
+        XCTAssertTrue(store.filteredItems.isEmpty)
+        store.folderFilter = .all
+        store.typeFilter = .sshKey
+        store.query = "SHA256"
+        XCTAssertEqual(store.filteredItems.map(\.id), ["ssh"])
+        await store.lock().value
+        XCTAssertNil(store.typeFilter)
+    }
+
+    func testGenericCopiesPreserveValuesAndRejectQueuedActionsAfterSync() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        await store.copyField(for: "one", fieldID: "custom:0")
+        XCTAssertEqual(board.string(forType: .string), " synthetic-pin ")
+        let old = store.generation
+        board.clearContents()
+        await store.sync()
+        await store.copyField(for: "one", fieldID: "custom:0", expectedGeneration: old)
+        XCTAssertNil(board.string(forType: .string))
+    }
+
+    func testLateSelectedDetailResultsAreDiscardedAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayRead()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        store.select("one")
+        let token = store.generation
+        let revision = store.indexRevision
+        let loading = Task { await store.details(for: "one", expectedGeneration: token, expectedRevision: revision) }
+        try await waitFor { await backend.readStarted }
+        await store.lock().value
+        await backend.resumeRead()
+        let details = await loading.value
+        XCTAssertNil(details)
+    }
+
+    func testLateGenericCopyCannotReachClipboardAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.delayRead()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let copying = Task { await store.copyField(for: "one", fieldID: "login.password") }
+        try await waitFor { await backend.readStarted }
+        await store.lock().value
+        await backend.resumeRead()
+        await copying.value
+        XCTAssertNil(board.string(forType: .string))
+    }
     func testCountdownUsesVaultActivityAndResetsOnInteraction() async {
         var now: TimeInterval = 100
         let board = NSPasteboard(name: .init("WardenBarCountdown-" + UUID().uuidString))
