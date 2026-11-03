@@ -1,21 +1,32 @@
 import Foundation
 import OSLog
 
+public enum VaultReadPolicy: Sendable { case onDemand, sessionSnapshot }
+
 /// Owns the in-memory session. All data commands are exclusive; locking preempts them.
 public actor BitwardenVault {
     public private(set) var state: VaultState = .locked
     private let configuration: CLIConfiguration
     private let runner = CLIProcessRunner()
     private let timeout: TimeInterval
+    private let readPolicy: VaultReadPolicy
+    private let clock: @Sendable () -> Date
+    private struct SnapshotSecrets: Sendable {
+        let password: SecretValue?
+        let seed: SecretValue?
+    }
+    private var snapshot: [String: SnapshotSecrets] = [:]
     private var session: SecretValue?
     private var authorizedIDs = Set<String>()
     private var generation: UInt64 = 0
     private var nextOperation: UInt64 = 0
     private var operation: (id: UInt64, task: Task<Data, Error>)?
 
-    public init(configuration: CLIConfiguration, timeout: TimeInterval = 30) {
+    public init(configuration: CLIConfiguration, timeout: TimeInterval = 30, readPolicy: VaultReadPolicy = .onDemand, clock: @escaping @Sendable () -> Date = { Date() }) {
         self.configuration = configuration
         self.timeout = timeout
+        self.readPolicy = readPolicy
+        self.clock = clock
     }
 
     public func version() async throws -> String {
@@ -39,6 +50,7 @@ public actor BitwardenVault {
             generation &+= 1
             session = nil
             authorizedIDs.removeAll()
+            snapshot.removeAll()
             // Without BW_SESSION, coarse status cannot prove a failed backend lock was repaired.
             if state != .lockFailed {
                 state = reported == .unauthenticated ? .unauthenticated : .locked
@@ -54,6 +66,8 @@ public actor BitwardenVault {
         guard state != .unlocked else { throw VaultError.busy }
         guard !masterPassword.isEmpty, !masterPassword.contains("\0") else { throw VaultError.invalidPassword }
         generation &+= 1
+        snapshot.removeAll()
+        authorizedIDs.removeAll()
         let token = generation
         state = .unlocking
         do {
@@ -81,11 +95,21 @@ public actor BitwardenVault {
     public func items() async throws -> [VaultItemSummary] {
         try requireReady()
         authorizedIDs.removeAll()
+        snapshot.removeAll()
         let token = generation
         let data = try await perform(["list", "items"], authenticated: true)
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
         let items = try decode([WireItem].self, from: data).filter(\.isSupported)
         authorizedIDs = Set(items.map(\.id))
+        if readPolicy == .sessionSnapshot {
+            // Only supported personal login fields survive the response's transient lifetime.
+            for item in items {
+                snapshot[item.id] = SnapshotSecrets(
+                    password: item.login?.password.map(SecretValue.init),
+                    seed: item.login?.totp.map(SecretValue.init)
+                )
+            }
+        }
         return items.map(\.summary)
     }
 
@@ -104,6 +128,12 @@ public actor BitwardenVault {
     }
 
     public func totp(for id: String) async throws -> SecretValue {
+        if readPolicy == .sessionSnapshot {
+            let started = ProcessInfo.processInfo.systemUptime
+            defer { Self.recordDuration("snapshot_totp", since: started) }
+            guard let seed = try snapshotEntry(for: id).seed else { throw VaultError.itemUnavailable }
+            return try seed.withValue { try LocalTOTP.generate(seed: $0, at: clock()) }
+        }
         let token = generation
         let item = try await detail(for: id)
         guard item.metadata.summary.hasTOTP else { throw VaultError.itemUnavailable }
@@ -118,9 +148,22 @@ public actor BitwardenVault {
     }
 
     public func password(for id: String) async throws -> SecretValue {
+        if readPolicy == .sessionSnapshot {
+            let started = ProcessInfo.processInfo.systemUptime
+            defer { Self.recordDuration("snapshot_password", since: started) }
+            guard let password = try snapshotEntry(for: id).password else { throw VaultError.itemUnavailable }
+            return password
+        }
         let item = try await detail(for: id)
         guard let password = item.password else { throw VaultError.itemUnavailable }
         return SecretValue(password)
+    }
+
+    private func snapshotEntry(for id: String) throws -> SnapshotSecrets {
+        // Read-only folder requests may be in flight. Snapshot mutation always revokes entries first.
+        guard state == .unlocked, session != nil else { throw VaultError.locked }
+        guard authorizedIDs.contains(id), let entry = snapshot[id] else { throw VaultError.itemUnavailable }
+        return entry
     }
 
     private func detail(for id: String) async throws -> WireItemDetail {
@@ -140,6 +183,10 @@ public actor BitwardenVault {
 
     public func sync() async throws {
         try requireReady()
+        if readPolicy == .sessionSnapshot {
+            snapshot.removeAll()
+            authorizedIDs.removeAll()
+        }
         let token = generation
         _ = try await perform(["sync"], authenticated: true)
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
@@ -154,6 +201,7 @@ public actor BitwardenVault {
         defer { Self.recordDuration("lock", since: started) }
         generation &+= 1
         session = nil
+        snapshot.removeAll()
         authorizedIDs.removeAll()
         state = .locking
         let previous = operation
