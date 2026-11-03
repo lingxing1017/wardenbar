@@ -90,11 +90,17 @@ public actor BitwardenVault {
     }
 
     public func folders() async throws -> [VaultFolder] {
+        struct WireFolder: Decodable { let id: String?; let name: String }
         try requireReady()
         let token = generation
         let data = try await perform(["list", "folders"], authenticated: true)
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
-        return try decode([VaultFolder].self, from: data).filter { UUID(uuidString: $0.id) != nil }
+        // CLI versions may include a synthetic "no folder" entry with an empty/null ID.
+        // The UI already supplies its own localized unfiled filter.
+        return try decode([WireFolder].self, from: data).compactMap {
+            guard let id = $0.id, UUID(uuidString: id) != nil else { return nil }
+            return VaultFolder(id: id, name: $0.name)
+        }
     }
 
     public func totp(for id: String) async throws -> SecretValue {

@@ -77,7 +77,7 @@ else:
                 item("55555555-5555-5555-5555-555555555555", deletedDate="2026-01-01T00:00:00Z")
             ]))
     elif args == ["list", "folders"]:
-        print(json.dumps([{"id": "66666666-6666-6666-6666-666666666666", "name": "Synthetic folder"}]))
+        print(json.dumps([{"id": None, "name": "No Folder"}, {"name": "No Folder"}, {"id": "66666666-6666-6666-6666-666666666666", "name": "Synthetic folder"}]))
     elif args == ["get", "totp", item_id]:
         delay("totp")
         print("synthetic-invalid-code" if (root / "invalid-totp").exists() else "123456")
