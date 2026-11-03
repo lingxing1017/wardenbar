@@ -50,7 +50,8 @@ struct UnlockView: View {
     private func unlock() {
         guard store.phase == .locked, !password.isEmpty else { return }
         let input = password
+        let generation = store.generation
         password = ""
-        Task { await store.unlock(masterPassword: input) }
+        Task { await store.unlock(masterPassword: input, expectedGeneration: generation) }
     }
 }
