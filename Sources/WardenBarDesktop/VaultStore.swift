@@ -65,6 +65,15 @@ public final class VaultStore: ObservableObject {
         }
         let token = generation
         do {
+            _ = try await backend.version()
+        } catch {
+            guard generation == token else { return }
+            phase = .setup
+            errorMessage = "Bitwarden CLI 无法运行或返回了无效版本，请检查安装后重试。"
+            return
+        }
+        guard generation == token else { return }
+        do {
             let status = try await backend.status()
             guard generation == token else { return }
             phase = status == .unauthenticated ? .setup : .locked
