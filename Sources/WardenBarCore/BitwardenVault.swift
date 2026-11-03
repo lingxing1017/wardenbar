@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Owns the in-memory session. All data commands are exclusive; locking preempts them.
 public actor BitwardenVault {
@@ -115,6 +116,8 @@ public actor BitwardenVault {
     /// Once started, cleanup runs even if the caller cancels its task.
     public func lock() async throws {
         guard state != .locking else { throw VaultError.busy }
+        let started = ProcessInfo.processInfo.systemUptime
+        defer { Self.recordDuration("lock", since: started) }
         generation &+= 1
         session = nil
         authorizedIDs.removeAll()
@@ -155,6 +158,10 @@ public actor BitwardenVault {
         _ arguments: [String], authenticated: Bool = false, masterPassword: String? = nil
     ) async throws -> Data {
         guard operation == nil, state != .locking else { throw VaultError.busy }
+        let started = ProcessInfo.processInfo.systemUptime
+        // Only fixed verbs, never paths, item IDs, CLI output or credentials.
+        let category = ["unlock", "status", "list", "get", "sync", "--version"].contains(arguments.first ?? "") ? arguments[0] : "other"
+        defer { Self.recordDuration(category, since: started) }
         try Task.checkCancellation()
         try configuration.prepareDataDirectory()
         var environment = configuration.environment()
@@ -188,6 +195,12 @@ public actor BitwardenVault {
             guard token == generation else { throw VaultError.sessionChanged }
             throw error
         }
+    }
+
+    private static func recordDuration(_ category: String, since start: TimeInterval) {
+        let milliseconds = Int((ProcessInfo.processInfo.systemUptime - start) * 1_000)
+        Logger(subsystem: "org.wardenbar.WardenBar", category: "performance")
+            .info("CLI operation=\(category, privacy: .public) duration_ms=\(milliseconds, privacy: .public)")
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
