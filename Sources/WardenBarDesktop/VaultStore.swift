@@ -14,6 +14,7 @@ public final class VaultStore: ObservableObject {
     @Published public private(set) var activityMessage: String?
     @Published public private(set) var selectedID: String?
     @Published public private(set) var isWorking = false
+    @Published public private(set) var isRefreshingFolders = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var notice: String?
     @Published public private(set) var lastSync: Date?
@@ -84,7 +85,8 @@ public final class VaultStore: ObservableObject {
         errorMessage = nil
         notice = nil
         userDidInteract()
-        defer { if generation == token { isWorking = false; activityMessage = nil } }
+        var releasedWork = false
+        defer { if generation == token, !releasedWork { isWorking = false; activityMessage = nil } }
         do {
             try await backend.unlock(masterPassword: masterPassword)
             guard generation == token, phase == .unlocking else { return }
@@ -93,6 +95,9 @@ public final class VaultStore: ObservableObject {
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
+            isWorking = false
+            activityMessage = nil
+            releasedWork = true
             await loadFolders(backend, token: token)
             guard generation == token, phase == .unlocked else { return }
             userDidInteract()
@@ -111,28 +116,32 @@ public final class VaultStore: ObservableObject {
 
     public func sync(expectedGeneration: UInt64? = nil) async {
         if let expectedGeneration, expectedGeneration != generation { return }
-        guard phase == .unlocked, !isWorking, let backend else { return }
+        guard phase == .unlocked, !isWorking, !isRefreshingFolders, let backend else { return }
         let token = generation
         isWorking = true
         activityMessage = "正在同步…"
         errorMessage = nil
         userDidInteract()
-        defer { if generation == token { isWorking = false; activityMessage = nil } }
+        var releasedWork = false
+        defer { if generation == token, !releasedWork { isWorking = false; activityMessage = nil } }
         do {
             try await backend.sync()
             guard generation == token, phase == .unlocked else { return }
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
             items = loaded
-            await loadFolders(backend, token: token)
-            guard generation == token, phase == .unlocked else { return }
             if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
             lastSync = Date()
             userDidInteract()
             showNotice("同步完成")
+            isWorking = false
+            activityMessage = nil
+            releasedWork = true
+            await loadFolders(backend, token: token)
+            guard generation == token, phase == .unlocked else { return }
         } catch {
             guard generation == token else { return }
-            errorMessage = "同步失败，仍可查看已有条目。请稍后重试。"
+            errorMessage = "同步失败，请重试同步或锁定后重新解锁。"
         }
     }
 
@@ -189,7 +198,14 @@ public final class VaultStore: ObservableObject {
     }
 
     private func loadFolders(_ backend: any VaultBackend, token: UInt64) async {
+        isRefreshingFolders = true
         activityMessage = "正在读取文件夹…"
+        defer {
+            if generation == token {
+                isRefreshingFolders = false
+                if activityMessage == "正在读取文件夹…" { activityMessage = nil }
+            }
+        }
         do {
             let loaded = try await backend.folders()
             guard generation == token, phase == .unlocked else { return }
@@ -214,6 +230,7 @@ public final class VaultStore: ObservableObject {
         selectedID = nil
         query = ""
         isWorking = false
+        isRefreshingFolders = false
         activityMessage = nil
         noticeTimer?.cancel()
         notice = nil

@@ -44,13 +44,13 @@ struct VaultPopoverView: View {
             Image(systemName: "lock.shield.fill").foregroundStyle(.tint).accessibilityHidden(true)
             Text("WardenBar").font(.system(size: 15, weight: .semibold))
             Spacer()
-            if store.isWorking { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
+            if store.isWorking || store.isRefreshingFolders { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
             Button {
                 let generation = store.generation
                 Task { await store.sync(expectedGeneration: generation) }
             } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
                 .labelStyle(.iconOnly).help("同步密码库")
-                .disabled(store.phase != .unlocked || store.isWorking)
+                .disabled(store.phase != .unlocked || store.isWorking || store.isRefreshingFolders)
             Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
                 .labelStyle(.iconOnly).help("锁定密码库")
                 .disabled(![.unlocked, .unlocking, .lockFailed].contains(store.phase))
