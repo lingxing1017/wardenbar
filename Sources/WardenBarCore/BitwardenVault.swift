@@ -111,7 +111,9 @@ public actor BitwardenVault {
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
         guard let text = String(data: data, encoding: .utf8) else { throw VaultError.invalidResponse }
         let code = text.trimmingCharacters(in: .newlines)
-        guard code.range(of: #"^[0-9]{6,10}$"#, options: .regularExpression) != nil else { throw VaultError.invalidResponse }
+        let pattern = item.metadata.login?.totp?.hasPrefix("steam://") == true
+            ? #"^[23456789BCDFGHJKMNPQRTVWXY]{5}$"# : #"^[0-9]{6,10}$"#
+        guard code.range(of: pattern, options: .regularExpression) != nil else { throw VaultError.invalidResponse }
         return SecretValue(code)
     }
 

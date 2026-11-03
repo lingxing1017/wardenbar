@@ -52,6 +52,14 @@ final class BitwardenVaultTests: XCTestCase {
         catch let error as VaultError { XCTAssertEqual(error, .itemUnavailable) }
     }
 
+    func testSteamGuardCodesAreAccepted() async throws {
+        try flag("steam-totp")
+        try await vault.unlock(masterPassword: "synthetic-master")
+        _ = try await vault.items()
+        let code = try await vault.totp(for: itemID)
+        XCTAssertEqual(code.withValue { $0 }, "BC2DF")
+    }
+
     func testLockDuringCodeReadDiscardsCode() async throws {
         try await vault.unlock(masterPassword: "synthetic-master")
         _ = try await vault.items()
