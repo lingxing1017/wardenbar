@@ -63,7 +63,8 @@ public final class VaultStore: ObservableObject {
         }
     }
 
-    public func unlock(masterPassword: String) async {
+    public func unlock(masterPassword: String, expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
         guard phase == .locked, !isWorking, !masterPassword.isEmpty, let backend else { return }
         generation &+= 1
         let token = generation
@@ -94,7 +95,8 @@ public final class VaultStore: ObservableObject {
         }
     }
 
-    public func sync() async {
+    public func sync(expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
         guard phase == .unlocked, !isWorking, let backend else { return }
         let token = generation
         isWorking = true
@@ -130,7 +132,8 @@ public final class VaultStore: ObservableObject {
         catch { errorMessage = "无法写入剪贴板，请重试。" }
     }
 
-    public func copyPassword(for id: String) async {
+    public func copyPassword(for id: String, expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
         guard phase == .unlocked, !isWorking, items.contains(where: { $0.id == id }), let backend else { return }
         let token = generation
         isWorking = true

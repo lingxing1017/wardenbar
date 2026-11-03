@@ -162,4 +162,29 @@ final class VaultStoreTests: XCTestCase {
         XCTAssertNotEqual(store.generation, before)
         XCTAssertEqual(store.phase, .locked)
     }
+
+    func testQueuedUnlockFromBeforeSafetyLockIsRejected() async {
+        let backend = ControlledVault()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        let old = store.generation
+        await store.lock().value
+        await store.unlock(masterPassword: "synthetic-master", expectedGeneration: old)
+        let started = await backend.unlockStarted
+        XCTAssertFalse(started)
+        XCTAssertEqual(store.phase, .locked)
+    }
+
+    func testQueuedCopyFromPreviousSessionCannotUseNewSession() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let old = store.generation
+        await store.lock().value
+        await store.unlock(masterPassword: "synthetic-master")
+        await store.copyPassword(for: "one", expectedGeneration: old)
+        XCTAssertNil(board.string(forType: .string))
+    }
 }

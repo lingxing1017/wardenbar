@@ -45,7 +45,10 @@ struct VaultPopoverView: View {
             Text("WardenBar").font(.system(size: 15, weight: .semibold))
             Spacer()
             if store.isWorking { ProgressView().controlSize(.small).accessibilityLabel("正在处理") }
-            Button { Task { await store.sync() } } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
+            Button {
+                let generation = store.generation
+                Task { await store.sync(expectedGeneration: generation) }
+            } label: { Label("同步密码库", systemImage: "arrow.triangle.2.circlepath") }
                 .labelStyle(.iconOnly).help("同步密码库")
                 .disabled(store.phase != .unlocked || store.isWorking)
             Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
@@ -144,7 +147,7 @@ private struct VaultListView: View {
                                     if item.favorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("已收藏") }
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
-                            Button { Task { await store.copyPassword(for: item.id) } } label: {
+                            Button { copyPassword(item.id) } label: {
                                 Label("复制密码", systemImage: "doc.on.doc")
                             }.labelStyle(.iconOnly).buttonStyle(.borderless).disabled(store.isWorking).help("复制密码")
                         }.padding(.vertical, 7).tag(item.id)
@@ -154,7 +157,7 @@ private struct VaultListView: View {
                     Text("\(store.filteredItems.count) 条登录").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("复制密码") {
-                        if let id = cursorID ?? store.filteredItems.first?.id { Task { await store.copyPassword(for: id) } }
+                        if let id = cursorID ?? store.filteredItems.first?.id { copyPassword(id) }
                     }.keyboardShortcut("2", modifiers: .command).disabled(store.isWorking)
                 }.padding(.horizontal, 16).padding(.vertical, 10)
             }
@@ -169,6 +172,12 @@ private struct VaultListView: View {
             let current = ids.firstIndex(of: cursorID ?? "") ?? 0
             if direction == .down { cursorID = ids[min(current + 1, ids.count - 1)] }
             if direction == .up { cursorID = ids[max(current - 1, 0)] }
+            store.userDidInteract()
         }
+    }
+
+    private func copyPassword(_ id: String) {
+        let generation = store.generation
+        Task { await store.copyPassword(for: id, expectedGeneration: generation) }
     }
 }

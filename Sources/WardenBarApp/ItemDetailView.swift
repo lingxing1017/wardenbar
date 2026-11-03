@@ -29,7 +29,7 @@ struct ItemDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("密码").font(.caption).foregroundStyle(.secondary)
                     Text("••••••••••••").font(.body).accessibilityLabel("密码已隐藏")
-                    Button { Task { await store.copyPassword(for: item.id) } } label: { Label("复制密码", systemImage: "doc.on.doc") }
+                    Button(action: copyPassword) { Label("复制密码", systemImage: "doc.on.doc") }
                         .keyboardShortcut("2", modifiers: .command)
                         .disabled(store.isWorking)
                 }
@@ -49,5 +49,10 @@ struct ItemDetailView: View {
                 Spacer(minLength: 0)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
         }
+    }
+
+    private func copyPassword() {
+        let generation = store.generation
+        Task { await store.copyPassword(for: item.id, expectedGeneration: generation) }
     }
 }
