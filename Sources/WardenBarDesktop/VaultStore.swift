@@ -260,6 +260,12 @@ public final class VaultStore: ObservableObject {
         return phase != .lockFailed
     }
 
+    public func secondsUntilLock(policy: AutoLockPolicy) -> Int? {
+        guard phase == .unlocked, let timeout = policy.timeout else { return nil }
+        let elapsed = max(0, clock() - lastActivity)
+        return Int(ceil(max(0, timeout - elapsed)))
+    }
+
     public func userDidInteract() {
         if phase == .unlocked || phase == .unlocking { lastActivity = clock() }
     }

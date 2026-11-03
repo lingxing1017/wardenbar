@@ -9,14 +9,14 @@ public final class SecurityMonitor {
     private let lastActivity: () -> TimeInterval
     private let isUnlocked: () -> Bool
     private let onLock: () -> Void
-    private let timeout: TimeInterval
+    private let policy: () -> AutoLockPolicy
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var timer: Timer?
 
     public init(
         workspace: NotificationCenter = NSWorkspace.shared.notificationCenter,
         distributed: NotificationCenter = DistributedNotificationCenter.default(),
-        timeout: TimeInterval = 300,
+        policy: @escaping () -> AutoLockPolicy = { .idle(minutes: 5) },
         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         lastActivity: @escaping () -> TimeInterval,
         isUnlocked: @escaping () -> Bool,
@@ -24,7 +24,7 @@ public final class SecurityMonitor {
     ) {
         self.workspace = workspace
         self.distributed = distributed
-        self.timeout = timeout
+        self.policy = policy
         self.clock = clock
         self.lastActivity = lastActivity
         self.isUnlocked = isUnlocked
@@ -46,6 +46,7 @@ public final class SecurityMonitor {
     }
 
     public func checkIdle() {
+        guard let timeout = policy().timeout else { return }
         if isUnlocked(), clock() - lastActivity() >= timeout { onLock() }
     }
 
