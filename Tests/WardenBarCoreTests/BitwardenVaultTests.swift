@@ -26,6 +26,7 @@ final class BitwardenVaultTests: XCTestCase {
     func testFoldersAndLoginCapabilitiesDoNotRetainSecrets() async throws {
         try await vault.unlock(masterPassword: "synthetic-master")
         let folders = try await vault.folders()
+        XCTAssertEqual(folders.count, 1)
         XCTAssertEqual(folders.first?.name, "Synthetic folder")
         let items = try await vault.items()
         XCTAssertEqual(items.first?.hasPassword, true)
