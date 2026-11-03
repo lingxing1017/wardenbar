@@ -187,4 +187,28 @@ final class VaultStoreTests: XCTestCase {
         await store.copyPassword(for: "one", expectedGeneration: old)
         XCTAssertNil(board.string(forType: .string))
     }
+
+    func testQuitIsDeniedWhenBackendLockFails() async {
+        let backend = ControlledVault()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        await backend.rejectLock()
+        let mayQuit = await store.prepareToQuit()
+        XCTAssertFalse(mayQuit)
+        XCTAssertEqual(store.phase, .lockFailed)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertTrue(store.items.isEmpty)
+    }
+
+    func testQuitIsAllowedAfterSuccessfulBackendLock() async {
+        let (store, board) = make(ControlledVault())
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let mayQuit = await store.prepareToQuit()
+        XCTAssertTrue(mayQuit)
+        XCTAssertEqual(store.phase, .locked)
+    }
 }
