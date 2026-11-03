@@ -29,11 +29,13 @@ public struct CLIProcessRunner: Sendable {
         arguments: [String],
         environment: [String: String],
         input: Data? = nil,
+        interaction: (any CLIProcessInteraction)? = nil,
         timeout: TimeInterval = 30,
         outputLimit: Int = 16 * 1024 * 1024
     ) async throws -> Data {
         try Task.checkCancellation()
-        guard timeout.isFinite, timeout > 0, outputLimit > 0 else { throw CLIProcessError.invalidLimits }
+        guard timeout.isFinite, timeout > 0, outputLimit > 0,
+              input == nil || interaction == nil else { throw CLIProcessError.invalidLimits }
         let cancellation = CancellationFlag()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
@@ -41,7 +43,7 @@ public struct CLIProcessRunner: Sendable {
                     do {
                         let output = try execute(
                             executable: executable, arguments: arguments, environment: environment,
-                            input: input ?? Data(), timeout: timeout, outputLimit: outputLimit,
+                            input: input ?? Data(), interaction: interaction, timeout: timeout, outputLimit: outputLimit,
                             cancellation: cancellation
                         )
                         continuation.resume(returning: output)
@@ -57,7 +59,7 @@ public struct CLIProcessRunner: Sendable {
 
     private func execute(
         executable: URL, arguments: [String], environment: [String: String],
-        input: Data, timeout: TimeInterval, outputLimit: Int, cancellation: CancellationFlag
+        input: Data, interaction: (any CLIProcessInteraction)?, timeout: TimeInterval, outputLimit: Int, cancellation: CancellationFlag
     ) throws -> Data {
         if cancellation.isCancelled { throw CancellationError() }
         let process = Process()
@@ -97,6 +99,7 @@ public struct CLIProcessRunner: Sendable {
         var output = Data()
         var totalBytes = 0
         var offset = 0
+        var pendingInput: Data? = interaction == nil ? input : nil
         var buffer = [UInt8](repeating: 0, count: 8192)
 
         func drain(_ descriptor: Int32, keep: Bool) throws {
@@ -112,6 +115,7 @@ public struct CLIProcessRunner: Sendable {
                 guard count <= outputLimit - totalBytes else { throw CLIProcessError.outputLimitExceeded }
                 totalBytes += count
                 if keep { output.append(contentsOf: buffer.prefix(count)) }
+                else { try interaction?.receiveStderr(Data(buffer.prefix(count))) }
             }
         }
 
@@ -122,18 +126,21 @@ public struct CLIProcessRunner: Sendable {
             try drain(errFD, keep: false)
 
             if !inputClosed {
-                if offset < input.count {
-                    let written = input.withUnsafeBytes { bytes in
-                        Darwin.write(inFD, bytes.baseAddress!.advanced(by: offset), min(8192, input.count - offset))
+                if pendingInput == nil, let interaction { pendingInput = interaction.nextInput(); offset = 0 }
+                if let pendingInput, offset < pendingInput.count {
+                    let written = pendingInput.withUnsafeBytes { bytes in
+                        Darwin.write(inFD, bytes.baseAddress!.advanced(by: offset), min(8192, pendingInput.count - offset))
                     }
                     if written > 0 { offset += written }
                     else if written < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
                         throw CLIProcessError.inputClosed
                     }
                 }
-                if offset == input.count {
-                    try? stdin.fileHandleForWriting.close()
-                    inputClosed = true
+                if let pending = pendingInput, offset == pending.count {
+                    if interaction == nil {
+                        try? stdin.fileHandleForWriting.close()
+                        inputClosed = true
+                    } else { pendingInput = nil; offset = 0 }
                 }
             }
 
@@ -149,7 +156,7 @@ public struct CLIProcessRunner: Sendable {
                 guard process.terminationStatus == 0 else {
                     throw CLIProcessError.nonzeroExit(process.terminationStatus)
                 }
-                guard offset == input.count else { throw CLIProcessError.inputClosed }
+                guard interaction != nil || offset == input.count else { throw CLIProcessError.inputClosed }
                 return output
             }
             usleep(5_000)
