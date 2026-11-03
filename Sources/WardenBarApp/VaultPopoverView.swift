@@ -17,7 +17,7 @@ struct VaultPopoverView: View {
                 switch store.phase {
                 case .checking: progress("正在检查密码库…")
                 case .locked, .unlocking: UnlockView(store: store)
-                case .locking: progress("正在锁定…")
+                case .locking: progress("本地访问已阻止，正在锁定后端…")
                 case .lockFailed:
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.shield").font(.largeTitle).foregroundStyle(.secondary)
@@ -94,7 +94,8 @@ struct VaultPopoverView: View {
 
     private var footer: some View {
         VStack(spacing: 3) {
-            if let notice = store.notice { Text(notice).foregroundStyle(.primary) }
+            if let activity = store.activityMessage { Text(activity).foregroundStyle(.primary) }
+            else if let notice = store.notice { Text(notice).foregroundStyle(.primary) }
             else if store.phase == .unlocked {
                 Text(store.lastSync.map { "已同步 " + $0.formatted(date: .omitted, time: .shortened) } ?? "本地密码库 · \(store.items.count) 条登录")
             } else { Text(store.phase == .lockFailed ? "后端锁定待重试" : "密码库访问受保护") }
@@ -124,25 +125,41 @@ private struct VaultListView: View {
                         .onSubmit { store.select(cursorID ?? store.filteredItems.first?.id) }
                         .accessibilityIdentifier("vaultSearch")
                 }.padding(9).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-                Picker("条目筛选", selection: $store.favoritesOnly) {
-                    Text("全部登录").tag(false)
-                    Text("收藏").tag(true)
-                }.pickerStyle(.segmented)
-            }.padding(14)
-            if store.filteredItems.isEmpty {
+                HStack(spacing: 8) {
+                    Picker("文件夹", selection: $store.folderFilter) {
+                        Text("全部文件夹").tag(FolderFilter.all)
+                        Text("未分类").tag(FolderFilter.unfiled)
+                        ForEach(store.folders) { folder in
+                            Text(folder.name).tag(FolderFilter.folder(folder.id))
+                        }
+                    }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity)
+                        .accessibilityLabel("文件夹")
+                    Menu {
+                        Toggle("只看 Bitwarden 收藏", isOn: $store.favoritesOnly)
+                        Text("在 Bitwarden 中管理收藏")
+                    } label: {
+                        Label("筛选", systemImage: store.favoritesOnly ? "star.fill" : "line.3.horizontal.decrease.circle")
+                    }.fixedSize().help("筛选已有的 Bitwarden 收藏")
+                }
+            }.padding(12)
+            if store.isWorking && store.items.isEmpty {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text(store.activityMessage ?? "正在读取登录条目…").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if store.filteredItems.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").font(.title).foregroundStyle(.secondary).accessibilityHidden(true)
-                    Text(store.query.isEmpty ? "没有可显示的登录条目" : "未找到匹配项").font(.headline)
-                    Text(store.query.isEmpty ? "当前支持普通个人登录条目。" : "试试名称、用户名或网址。")
+                    Text(store.items.isEmpty ? "没有可显示的登录条目" : "未找到匹配项").font(.headline)
+                    Text(store.items.isEmpty ? "当前支持普通个人登录条目。" : "试试其他文件夹、筛选或搜索词。")
                         .font(.callout).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $cursorID) {
                     ForEach(store.filteredItems) { item in
-                        HStack(spacing: 10) {
+                        HStack(spacing: 6) {
                             Button { store.select(item.id) } label: {
                                 HStack(spacing: 10) {
-                                    Image(systemName: "key.horizontal").font(.system(size: 17)).foregroundStyle(.secondary).frame(width: 24)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(item.name).font(.body.weight(.medium)).lineLimit(1)
                                         Text(item.username?.isEmpty == false ? item.username! : (item.uris.first ?? "登录条目"))
@@ -152,9 +169,20 @@ private struct VaultListView: View {
                                     if item.favorite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("已收藏") }
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
-                            Button { copyPassword(item.id) } label: {
-                                Label("复制密码", systemImage: "doc.on.doc")
-                            }.labelStyle(.iconOnly).buttonStyle(.borderless).disabled(store.isWorking).help("复制密码")
+                            HStack(spacing: 2) {
+                                Button { store.copyUsername(for: item.id) } label: {
+                                    Label("复制用户名", systemImage: "person")
+                                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                                }.disabled(store.isWorking || item.username?.isEmpty != false).help("复制用户名")
+                                Button { copyPassword(item.id) } label: {
+                                    Label("复制密码", systemImage: "key.horizontal")
+                                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                                }.disabled(store.isWorking || !item.hasPassword).help("复制密码")
+                                Button { copyTOTP(item.id) } label: {
+                                    Label("复制动态验证码", systemImage: "clock")
+                                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                                }.disabled(store.isWorking || !item.hasTOTP).help(item.hasTOTP ? "复制动态验证码" : "未配置动态验证码")
+                            }.labelStyle(.iconOnly).buttonStyle(.borderless).fixedSize()
                         }.padding(.vertical, 7).tag(item.id)
                     }
                 }.listStyle(.inset)
@@ -163,7 +191,8 @@ private struct VaultListView: View {
                     Spacer()
                     Button("复制密码") {
                         if let id = cursorID ?? store.filteredItems.first?.id { copyPassword(id) }
-                    }.keyboardShortcut("2", modifiers: .command).disabled(store.isWorking)
+                    }.keyboardShortcut("2", modifiers: .command)
+                        .disabled(store.isWorking || (store.filteredItems.first(where: { $0.id == cursorID }) ?? store.filteredItems.first)?.hasPassword != true)
                 }.padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
@@ -184,5 +213,10 @@ private struct VaultListView: View {
     private func copyPassword(_ id: String) {
         let generation = store.generation
         Task { await store.copyPassword(for: id, expectedGeneration: generation) }
+    }
+
+    private func copyTOTP(_ id: String) {
+        let generation = store.generation
+        Task { await store.copyTOTP(for: id, expectedGeneration: generation) }
     }
 }

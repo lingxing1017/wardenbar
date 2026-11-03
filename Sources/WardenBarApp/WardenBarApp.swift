@@ -74,7 +74,7 @@ struct WardenBarApplication: App {
                 store: store, dataDirectory: AppCoordinator.shared.options.dataDirectory,
                 configurationIssue: AppCoordinator.shared.configurationIssue
             )
-            .frame(width: 390, height: 520)
+            .frame(width: 360, height: 520)
         } label: {
             Image(systemName: store.phase == .lockFailed ? "exclamationmark.shield" : (store.phase == .unlocked ? "lock.open" : "lock.shield"))
                 .accessibilityLabel("WardenBar")

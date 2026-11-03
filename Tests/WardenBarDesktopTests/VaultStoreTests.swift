@@ -17,7 +17,7 @@ actor ControlledVault: VaultBackend {
     private var foldersWait: CheckedContinuation<Void, Never>?
     private var unlockWait: CheckedContinuation<Void, Never>?
     private var readWait: CheckedContinuation<Void, Never>?
-    private let records = [
+    private var records = [
         VaultItemSummary(id: "one", name: "Café", username: "alice", uris: ["https://example.invalid"], favorite: true, folderID: "folder", hasTOTP: true),
         VaultItemSummary(id: "two", name: "Mail", username: "bob", uris: ["https://mail.invalid"], favorite: false, folderID: nil)
     ]
@@ -60,6 +60,9 @@ actor ControlledVault: VaultBackend {
     func rejectFolders() { failFolders = true }
     func delayFolders() { pauseFolders = true }
     func resumeFolders() { foldersWait?.resume(); foldersWait = nil }
+    func useLongMetadata() {
+        records = [VaultItemSummary(id: "one", name: "A very long login name that must truncate before the copy actions", username: "long-account-name@example.invalid", uris: [], favorite: true, folderID: "folder", hasTOTP: true)]
+    }
 }
 
 @MainActor
