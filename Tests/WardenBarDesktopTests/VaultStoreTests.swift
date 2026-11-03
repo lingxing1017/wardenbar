@@ -7,6 +7,7 @@ actor ControlledVault: VaultBackend {
     var state: VaultState = .locked
     var unlockStarted = false
     var readStarted = false
+    var syncCalls = 0
     private var pauseUnlock = false
     private var pauseRead = false
     private var failLock = false
@@ -47,7 +48,7 @@ actor ControlledVault: VaultBackend {
         if pauseRead { await withCheckedContinuation { readWait = $0 } }
         return SecretValue("synthetic-password")
     }
-    func sync() throws { if failSync { throw CLIProcessError.nonzeroExit(8) } }
+    func sync() throws { syncCalls += 1; if failSync { throw CLIProcessError.nonzeroExit(8) } }
     func lock() throws {
         state = failLock ? .lockFailed : .locked
         if failLock { throw CLIProcessError.nonzeroExit(9) }
@@ -69,6 +70,30 @@ actor ControlledVault: VaultBackend {
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testCopiesAreUsableBeforeFoldersFinishButSyncWaits() async throws {
+        let backend = ControlledVault()
+        await backend.delayFolders()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        let opening = Task { await store.unlock(masterPassword: "synthetic-master") }
+        try await waitFor { await backend.foldersStarted }
+        XCTAssertFalse(store.isWorking)
+        XCTAssertTrue(store.isRefreshingFolders)
+        store.copyUsername(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "alice")
+        await store.copyPassword(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "synthetic-password")
+        await store.copyTOTP(for: "one")
+        XCTAssertEqual(board.string(forType: .string), "123456")
+        await store.sync()
+        let syncCalls = await backend.syncCalls
+        XCTAssertEqual(syncCalls, 0)
+        await backend.resumeFolders()
+        await opening.value
+        XCTAssertFalse(store.isRefreshingFolders)
+        XCTAssertFalse(store.isWorking)
+    }
     func testLateFoldersCannotRepopulateAfterLock() async throws {
         let backend = ControlledVault()
         await backend.delayFolders()
