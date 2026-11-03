@@ -76,6 +76,21 @@ else:
             print("not-json-synthetic-sensitive-data")
         elif (root / "empty-list").exists():
             print("[]")
+        elif (root / "multiple-types").exists():
+            card = item("88888888-8888-8888-8888-888888888888", type=3, login=None,
+                        card={"number": "4111111111111111", "code": "987", "brand": "Visa"})
+            print(json.dumps([
+                item(),
+                item("77777777-7777-7777-7777-777777777777", type=2, login=None, secureNote={"type": 0}, notes=" synthetic note\n"),
+                card,
+                item("99999999-9999-9999-9999-999999999999", type=4, login=None, identity={"email": "synthetic@example.invalid", "ssn": "synthetic-ssn"}),
+                item("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", type=5, login=None, sshKey={"privateKey": "\nPRIVATE synthetic\nKEY\n", "publicKey": "ssh-ed25519 synthetic", "keyFingerprint": "SHA256:synthetic"}),
+                dict(card, id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", reprompt=1),
+                dict(card, id="cccccccc-cccc-cccc-cccc-cccccccccccc", organizationId="synthetic-org"),
+                dict(card, id="dddddddd-dddd-dddd-dddd-dddddddddddd", deletedDate="2026-01-01"),
+                item("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", type=999, login=None),
+                item("ffffffff-ffff-ffff-ffff-ffffffffffff", type=3, login=None)
+            ]))
         else:
             print(json.dumps([
                 item(reprompt=1 if (root / "protected-list").exists() else 0), item("22222222-2222-2222-2222-222222222222", reprompt=1),
