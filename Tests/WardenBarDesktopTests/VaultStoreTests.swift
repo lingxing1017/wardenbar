@@ -83,6 +83,11 @@ actor ControlledVault: VaultBackend {
         folderName = "A very long folder name that must fit inside the compact folder control"
         records = [VaultItemSummary(id: "one", name: "A very long login name that must truncate before the copy actions", username: "long-account-name@example.invalid", uris: [], favorite: true, folderID: "folder", hasTOTP: true)]
     }
+    func useScrollingRecords() {
+        records = (0..<60).map { index in
+            VaultItemSummary(id: "row\(index)", name: String(format: "Synthetic %03d", index), username: index % 2 == 0 ? "synthetic@example.invalid" : "user", uris: [], favorite: false, folderID: nil, hasPassword: true)
+        }
+    }
     func useMixedRecords() {
         records += [
             VaultItemSummary(id: "card", name: "Synthetic Visa", username: nil, uris: [], favorite: false, folderID: "folder", hasPassword: false, type: .card, subtitle: "Visa · ••••1111", primaryFieldID: "card.number"),
