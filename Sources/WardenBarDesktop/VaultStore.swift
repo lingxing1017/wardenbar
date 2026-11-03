@@ -153,7 +153,7 @@ public final class VaultStore: ObservableObject {
     }
 
     public func select(_ id: String?) {
-        guard phase == .unlocked else { return }
+        guard phase == .unlocked, id == nil || !isWorking else { return }
         selectedID = items.first { $0.id == id }?.id
         userDidInteract()
     }

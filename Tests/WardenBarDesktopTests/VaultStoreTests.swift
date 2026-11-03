@@ -161,6 +161,24 @@ final class VaultStoreTests: XCTestCase {
         await copying.value
         XCTAssertNil(board.string(forType: .string))
     }
+    func testOpeningDetailsWaitsUntilPendingCopyFinishes() async throws {
+        let backend = ControlledVault()
+        await backend.delayRead()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        let copying = Task { await store.copyField(for: "one", fieldID: "login.password") }
+        try await waitFor { await backend.readStarted }
+        store.select("one")
+        XCTAssertNil(store.selectedID)
+        await backend.resumeRead()
+        await copying.value
+        store.select("one")
+        XCTAssertEqual(store.selectedID, "one")
+        await store.lock().value
+    }
+
     func testCountdownUsesVaultActivityAndResetsOnInteraction() async {
         var now: TimeInterval = 100
         let board = NSPasteboard(name: .init("WardenBarCountdown-" + UUID().uuidString))
