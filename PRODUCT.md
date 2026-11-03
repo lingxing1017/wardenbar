@@ -41,4 +41,4 @@ WardenBar is an independent community client. The approved design uses native ma
 
 ## Open Decisions
 
-Public distribution, supported CLI-version matrix and expanded item types remain future work. Initial 5-minute inactivity and 30-second clipboard expiry are implementation defaults.
+Public distribution, supported CLI-version matrix and expanded item types remain future work. Auto-lock defaults to 5 minutes of vault inactivity and can be set to 1–1440 minutes or system-only. Both modes retain conservative locking on screen lock/sleep and session deactivation. The unlocked footer shows a monotonic countdown or system-only status. Only the numeric policy and popover width are persisted as display/security preferences. Clipboard expiry remains 30 seconds. The toolbar uses native Liquid Glass on supported macOS versions, with older-system and reduced-transparency fallbacks.
