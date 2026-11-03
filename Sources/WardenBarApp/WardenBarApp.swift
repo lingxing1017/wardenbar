@@ -67,14 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct WardenBarApplication: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store = AppCoordinator.shared.store
+    @AppStorage("popoverWidth") private var popoverWidth = PopoverWidth.defaultValue
 
     var body: some Scene {
         MenuBarExtra {
-            VaultPopoverView(
+            ResizableVaultPopover(
                 store: store, dataDirectory: AppCoordinator.shared.options.dataDirectory,
-                configurationIssue: AppCoordinator.shared.configurationIssue
+                configurationIssue: AppCoordinator.shared.configurationIssue, savedWidth: $popoverWidth
             )
-            .frame(width: 360, height: 520)
         } label: {
             Image(systemName: store.phase == .lockFailed ? "exclamationmark.shield" : (store.phase == .unlocked ? "lock.open" : "lock.shield"))
                 .accessibilityLabel("WardenBar")
