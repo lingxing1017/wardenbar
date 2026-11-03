@@ -184,6 +184,12 @@ public final class VaultStore: ObservableObject {
         return task
     }
 
+    /// Keep the failure visible and allow a retry before ordinary application termination.
+    public func prepareToQuit() async -> Bool {
+        await lock().value
+        return phase != .lockFailed
+    }
+
     public func userDidInteract() {
         if phase == .unlocked || phase == .unlocking { lastActivity = clock() }
     }

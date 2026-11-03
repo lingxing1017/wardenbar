@@ -52,11 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         terminating = true
-        let locking = AppCoordinator.shared.store.lock()
         Task {
-            await locking.value
-            AppCoordinator.shared.stopMonitoring()
-            sender.reply(toApplicationShouldTerminate: true)
+            let mayQuit = await AppCoordinator.shared.store.prepareToQuit()
+            if mayQuit { AppCoordinator.shared.stopMonitoring() }
+            else { terminating = false }
+            sender.reply(toApplicationShouldTerminate: mayQuit)
         }
         return .terminateLater
     }
@@ -76,7 +76,7 @@ struct WardenBarApplication: App {
             )
             .frame(width: 390, height: 520)
         } label: {
-            Image(systemName: store.phase == .unlocked ? "lock.open" : "lock.shield")
+            Image(systemName: store.phase == .lockFailed ? "exclamationmark.shield" : (store.phase == .unlocked ? "lock.open" : "lock.shield"))
                 .accessibilityLabel("WardenBar")
         }
         .menuBarExtraStyle(.window)
