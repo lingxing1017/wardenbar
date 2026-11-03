@@ -8,13 +8,22 @@ struct ResizableVaultPopover: View {
     let dataDirectory: URL
     let configurationIssue: String?
     @Binding var savedWidth: Double
+    @Binding var lockPolicy: AutoLockPolicy
     @State private var liveWidth: Double?
     @State private var dragStart: (mouseX: Double, width: Double)?
+
+    init(store: VaultStore, dataDirectory: URL, configurationIssue: String?, savedWidth: Binding<Double>, lockPolicy: Binding<AutoLockPolicy> = .constant(.idle(minutes: 5))) {
+        self.store = store
+        self.dataDirectory = dataDirectory
+        self.configurationIssue = configurationIssue
+        _savedWidth = savedWidth
+        _lockPolicy = lockPolicy
+    }
 
     private var width: Double { PopoverWidth.clamp(liveWidth ?? savedWidth) }
 
     var body: some View {
-        VaultPopoverView(store: store, dataDirectory: dataDirectory, configurationIssue: configurationIssue)
+        VaultPopoverView(store: store, dataDirectory: dataDirectory, configurationIssue: configurationIssue, lockPolicy: $lockPolicy)
             .frame(width: CGFloat(width), height: 520)
             .background { PopoverWindowWidth(width: width).frame(width: 0, height: 0) }
             .overlay(alignment: .bottomTrailing) {
