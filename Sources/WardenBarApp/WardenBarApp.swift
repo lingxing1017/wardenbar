@@ -9,6 +9,7 @@ final class AppCoordinator {
     let store: VaultStore
     let options: RuntimeOptions
     let configurationIssue: String?
+    let lockPreferences = AutoLockPreferences()
     private var monitor: SecurityMonitor?
 
     private init() {
@@ -25,7 +26,9 @@ final class AppCoordinator {
 
     func start() {
         let store = self.store
+        let preferences = lockPreferences
         monitor = SecurityMonitor(
+            policy: { preferences.policy },
             lastActivity: { [weak store] in store?.lastActivity ?? 0 },
             isUnlocked: { [weak store] in store?.phase == .unlocked },
             onLock: { [weak store] in
@@ -67,13 +70,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct WardenBarApplication: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store = AppCoordinator.shared.store
+    @StateObject private var lockPreferences = AppCoordinator.shared.lockPreferences
     @AppStorage("popoverWidth") private var popoverWidth = PopoverWidth.defaultValue
 
     var body: some Scene {
         MenuBarExtra {
             ResizableVaultPopover(
                 store: store, dataDirectory: AppCoordinator.shared.options.dataDirectory,
-                configurationIssue: AppCoordinator.shared.configurationIssue, savedWidth: $popoverWidth
+                configurationIssue: AppCoordinator.shared.configurationIssue, savedWidth: $popoverWidth,
+                lockPolicy: $lockPreferences.policy
             )
         } label: {
             Image(systemName: store.phase == .lockFailed ? "exclamationmark.shield" : (store.phase == .unlocked ? "lock.open" : "lock.shield"))

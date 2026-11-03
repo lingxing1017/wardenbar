@@ -7,6 +7,15 @@ struct VaultPopoverView: View {
     @ObservedObject var store: VaultStore
     let dataDirectory: URL
     let configurationIssue: String?
+    @Binding var lockPolicy: AutoLockPolicy
+    @State private var showsLockSettings = false
+
+    init(store: VaultStore, dataDirectory: URL, configurationIssue: String?, lockPolicy: Binding<AutoLockPolicy> = .constant(.idle(minutes: 5))) {
+        self.store = store
+        self.dataDirectory = dataDirectory
+        self.configurationIssue = configurationIssue
+        _lockPolicy = lockPolicy
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +23,9 @@ struct VaultPopoverView: View {
             Divider()
             if let error = configurationIssue ?? store.errorMessage { errorBanner(error) }
             Group {
+                if showsLockSettings {
+                    AutoLockSettingsView(policy: $lockPolicy, onClose: { showsLockSettings = false; store.userDidInteract() }, onInteract: { store.userDidInteract() })
+                } else {
                 switch store.phase {
                 case .checking: progress("正在检查密码库…")
                 case .locked, .unlocking: UnlockView(store: store)
@@ -30,13 +42,17 @@ struct VaultPopoverView: View {
                     if let item = store.selectedItem { ItemDetailView(store: store, item: item) }
                     else { VaultListView(store: store) }
                 }
+                }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { store.userDidInteract() }
-        .onExitCommand { NSApp.keyWindow?.orderOut(nil) }
+        .onExitCommand {
+            if showsLockSettings { showsLockSettings = false; store.userDidInteract() }
+            else { NSApp.keyWindow?.orderOut(nil) }
+        }
     }
 
     private var header: some View {
@@ -55,6 +71,8 @@ struct VaultPopoverView: View {
                 .labelStyle(.iconOnly).help("锁定密码库")
                 .disabled(![.unlocked, .unlocking, .lockFailed].contains(store.phase))
             Menu {
+                Button("自动锁定…") { showsLockSettings = true; store.userDidInteract() }
+                Divider()
                 Button("打开密码库目录") { NSWorkspace.shared.open(dataDirectory) }
                 Divider()
                 Button("退出 WardenBar") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
@@ -99,7 +117,19 @@ struct VaultPopoverView: View {
             else if store.phase == .unlocked {
                 Text(store.lastSync.map { "已同步 " + $0.formatted(date: .omitted, time: .shortened) } ?? "本地密码库 · \(store.items.count) 条登录")
             } else { Text(store.phase == .lockFailed ? "后端锁定待重试" : "密码库访问受保护") }
-            Text("5 分钟未操作后锁定 · 复制后 30 秒清理")
+            HStack(spacing: 4) {
+                if store.phase == .unlocked {
+                    Button { showsLockSettings = true; store.userDidInteract() } label: {
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            if let seconds = store.secondsUntilLock(policy: lockPolicy) {
+                                Text(String(format: "锁定 %02d:%02d", seconds / 60, seconds % 60)).monospacedDigit()
+                            } else { Text("随系统锁定") }
+                        }
+                    }.buttonStyle(.borderless).help("修改自动锁定设置")
+                    Text("·")
+                }
+                Text("剪贴板 30 秒清理")
+            }
         }.font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 9)
     }
 

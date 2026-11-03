@@ -57,6 +57,10 @@ final class NativeRenderTests: XCTestCase {
         try await render(store, name: "list", dark: false)
         try await render(store, name: "list-narrow", dark: false, width: PopoverWidth.minimum)
         try await render(store, name: "list-wide", dark: false, width: PopoverWidth.maximum)
+        try await render(store, name: "system-only", dark: true, width: PopoverWidth.minimum, policy: .systemOnly)
+        let settings = AutoLockSettingsView(policy: .constant(.idle(minutes: 17)), onClose: {}, onInteract: {})
+            .frame(width: 280, height: 420)
+        try await renderView(settings, name: "lock-settings", dark: false, width: 280, height: 420)
         store.select("one")
         try await render(store, name: "detail-dark", dark: true)
         store.select(nil)
@@ -67,14 +71,17 @@ final class NativeRenderTests: XCTestCase {
         await store.lock().value
     }
 
-    private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue) async throws {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: CGFloat(width), height: 520), styleMask: .borderless, backing: .buffered, defer: false)
+    private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue, policy: AutoLockPolicy = .idle(minutes: 5)) async throws {
+        let view = ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: .constant(width), lockPolicy: .constant(policy))
+        try await renderView(view, name: name, dark: dark, width: width, height: 520)
+    }
+
+    private func renderView<V: View>(_ view: V, name: String, dark: Bool, width: Double, height: Double) async throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        let view = ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: .constant(width))
-            .environment(\.colorScheme, dark ? .dark : .light)
-        let host = NSHostingView(rootView: view)
+        let host = NSHostingView(rootView: view.environment(\.colorScheme, dark ? .dark : .light))
         window.contentView = host
-        host.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: 520)
+        host.frame = NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 0.5)
         try await Task.sleep(nanoseconds: 100_000_000)
