@@ -14,6 +14,7 @@ public actor BitwardenVault {
     private struct SnapshotSecrets: Sendable {
         let password: SecretValue?
         let seed: SecretValue?
+        let fields: [VaultDetailField]
     }
     private var snapshot: [String: SnapshotSecrets] = [:]
     private var session: SecretValue?
@@ -99,14 +100,17 @@ public actor BitwardenVault {
         let token = generation
         let data = try await perform(["list", "items"], authenticated: true)
         guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
-        let items = try decode([WireItem].self, from: data).filter(\.isSupported)
+        let items = try decode([WireItem].self, from: data).filter {
+            readPolicy == .sessionSnapshot ? $0.isSupportedRecord : $0.isSupported
+        }
         authorizedIDs = Set(items.map(\.id))
         if readPolicy == .sessionSnapshot {
-            // Only supported personal login fields survive the response's transient lifetime.
+            // Only allowlisted personal records survive the response's transient lifetime.
             for item in items {
                 snapshot[item.id] = SnapshotSecrets(
-                    password: item.login?.password.map(SecretValue.init),
-                    seed: item.login?.totp.map(SecretValue.init)
+                    password: item.type == 1 ? item.login?.password.map(SecretValue.init) : nil,
+                    seed: item.type == 1 ? item.login?.totp.map(SecretValue.init) : nil,
+                    fields: item.detailFields
                 )
             }
         }
@@ -157,6 +161,19 @@ public actor BitwardenVault {
         let item = try await detail(for: id)
         guard let password = item.password else { throw VaultError.itemUnavailable }
         return SecretValue(password)
+    }
+
+    public func details(for id: String) async throws -> [VaultDetailField] {
+        if readPolicy == .sessionSnapshot { return try snapshotEntry(for: id).fields }
+        return try await detail(for: id).metadata.detailFields
+    }
+
+    public func fieldValue(for id: String, fieldID: String) async throws -> SecretValue {
+        let token = generation
+        let fields = try await details(for: id)
+        guard token == generation, state == .unlocked else { throw VaultError.sessionChanged }
+        guard let field = fields.first(where: { $0.id == fieldID }) else { throw VaultError.itemUnavailable }
+        return field.value
     }
 
     private func snapshotEntry(for id: String) throws -> SnapshotSecrets {

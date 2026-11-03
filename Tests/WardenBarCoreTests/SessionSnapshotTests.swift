@@ -3,6 +3,65 @@ import XCTest
 @testable import WardenBarCore
 
 final class SessionSnapshotTests: XCTestCase {
+    func testFiveTypesUseSnapshotFieldsWithoutGetCommands() async throws {
+        try flag("multiple-types")
+        try await prime()
+        let items = try await vault.items()
+        XCTAssertEqual(Set(items.map(\.type)), Set(VaultItemType.allCases))
+        XCTAssertEqual(items.count, 5)
+        try flag("reject-get")
+        for item in items {
+            let fields = try await vault.details(for: item.id)
+            XCTAssertFalse(fields.isEmpty)
+            for field in fields {
+                let value = try await vault.fieldValue(for: item.id, fieldID: field.id)
+                XCTAssertEqual(value.withValue { $0 }, field.value.withValue { $0 })
+            }
+        }
+        let key = try await vault.fieldValue(for: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", fieldID: "ssh.privateKey")
+        XCTAssertEqual(key.withValue { $0 }, "\nPRIVATE synthetic\nKEY\n")
+        let commands = try String(contentsOf: configuration.dataDirectory.appendingPathComponent("commands"))
+        XCTAssertFalse(commands.split(separator: "\n").contains(where: { $0.hasPrefix("get ") }))
+        try await vault.lock()
+        do { _ = try await vault.details(for: id); XCTFail("Locked details") } catch let error as VaultError { XCTAssertEqual(error, .locked) }
+    }
+
+    func testDefaultOnDemandIndexRemainsLoginOnly() async throws {
+        try flag("multiple-types")
+        let diagnostics = BitwardenVault(configuration: configuration)
+        try await diagnostics.unlock(masterPassword: "synthetic-master")
+        let items = try await diagnostics.items()
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.type, .login)
+        try await diagnostics.lock()
+    }
+
+    func testLockDuringGenericOnDemandReadDiscardsFields() async throws {
+        let diagnostics = BitwardenVault(configuration: configuration)
+        try await diagnostics.unlock(masterPassword: "synthetic-master")
+        _ = try await diagnostics.items()
+        try flag("delay-read")
+        let reading = Task { try await diagnostics.fieldValue(for: id, fieldID: "login.password") }
+        try await waitForFile(configuration.dataDirectory.appendingPathComponent("read-started"))
+        try await diagnostics.lock()
+        do { _ = try await reading.value; XCTFail("Stale generic value") }
+        catch let error as VaultError { XCTAssertEqual(error, .sessionChanged) }
+    }
+
+    func testGenericFieldsAreRevokedOnSyncAndMalformedRefresh() async throws {
+        try flag("multiple-types")
+        try await prime()
+        let card = "88888888-8888-8888-8888-888888888888"
+        _ = try await vault.fieldValue(for: card, fieldID: "card.number")
+        try await vault.sync()
+        do { _ = try await vault.fieldValue(for: card, fieldID: "card.number"); XCTFail("Stale card") }
+        catch let error as VaultError { XCTAssertEqual(error, .itemUnavailable) }
+        _ = try await vault.items()
+        try flag("malformed-list")
+        do { _ = try await vault.items(); XCTFail("Malformed list") } catch {}
+        do { _ = try await vault.details(for: card); XCTFail("Stale details") }
+        catch let error as VaultError { XCTAssertEqual(error, .itemUnavailable) }
+    }
     private var directory: URL!
     private var configuration: CLIConfiguration!
     private var vault: BitwardenVault!
