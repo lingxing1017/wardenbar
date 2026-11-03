@@ -2,6 +2,7 @@ import WardenBarCore
 
 public protocol VaultBackend: Sendable {
     var state: VaultState { get async }
+    func version() async throws -> String
     func status() async throws -> CLIStatus
     func unlock(masterPassword: String) async throws
     func items() async throws -> [VaultItemSummary]

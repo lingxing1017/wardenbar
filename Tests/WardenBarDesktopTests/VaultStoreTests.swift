@@ -8,6 +8,9 @@ actor ControlledVault: VaultBackend {
     var unlockStarted = false
     var readStarted = false
     var syncCalls = 0
+    var versionCalls = 0
+    var statusCalls = 0
+    private var failVersion = false
     private var pauseUnlock = false
     private var pauseRead = false
     private var failLock = false
@@ -24,7 +27,13 @@ actor ControlledVault: VaultBackend {
         VaultItemSummary(id: "two", name: "Mail", username: "bob", uris: ["https://mail.invalid"], favorite: false, folderID: nil)
     ]
 
-    func status() -> CLIStatus { state == .unlocked ? .unlocked : .locked }
+    func version() throws -> String {
+        versionCalls += 1
+        if failVersion { throw CLIProcessError.nonzeroExit(1) }
+        return "2026.10.1"
+    }
+    func rejectVersion(_ value: Bool) { failVersion = value }
+    func status() -> CLIStatus { statusCalls += 1; return state == .unlocked ? .unlocked : .locked }
     func unlock(masterPassword: String) async throws {
         guard masterPassword == "synthetic-master" else { throw CLIProcessError.nonzeroExit(1) }
         state = .unlocked
@@ -100,6 +109,29 @@ actor ControlledVault: VaultBackend {
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testStartupValidatesCLIBeforeReadingStatusAndCanRetry() async {
+        let backend = ControlledVault()
+        await backend.rejectVersion(true)
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        XCTAssertEqual(store.phase, .setup)
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertFalse(store.errorMessage?.contains("nonzeroExit") ?? false)
+        let versions = await backend.versionCalls
+        let statuses = await backend.statusCalls
+        XCTAssertEqual(versions, 1)
+        XCTAssertEqual(statuses, 0)
+        await backend.rejectVersion(false)
+        await store.start()
+        XCTAssertEqual(store.phase, .locked)
+        XCTAssertNil(store.errorMessage)
+        let retryVersions = await backend.versionCalls
+        let retryStatuses = await backend.statusCalls
+        XCTAssertEqual(retryVersions, 2)
+        XCTAssertEqual(retryStatuses, 1)
+    }
+
     func testTypesIntersectFolderAndMetadataSearchAndResetOnLock() async {
         let backend = ControlledVault()
         await backend.useMixedRecords()
