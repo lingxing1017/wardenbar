@@ -2,12 +2,15 @@ import Combine
 import Foundation
 import WardenBarCore
 
-public enum VaultPhase: Equatable { case checking, setup, locked, unlocking, unlocked, locking, lockFailed }
+public enum VaultPhase: Equatable { case checking, setup, signingIn, locked, unlocking, unlocked, locking, lockFailed }
 public enum FolderFilter: Hashable { case all, unfiled, folder(String) }
 
 @MainActor
 public final class VaultStore: ObservableObject {
     @Published public private(set) var phase: VaultPhase = .checking
+    @Published public private(set) var requiresLogin = false
+    @Published public private(set) var loginChallenge: CLILoginChallenge?
+    public let cliExecutable: URL?
     @Published public private(set) var items: [VaultItemSummary] = []
     @Published public private(set) var folders: [VaultFolder] = []
     @Published public var folderFilter: FolderFilter = .all { didSet { userDidInteract() } }
@@ -29,10 +32,12 @@ public final class VaultStore: ObservableObject {
     private let clock: () -> TimeInterval
     private var locking: Task<Void, Never>?
     private var noticeTimer: Task<Void, Never>?
+    private var loginDialogue: CLILoginDialogue?
 
-    public init(backend: (any VaultBackend)?, clipboard: ClipboardService, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    public init(backend: (any VaultBackend)?, clipboard: ClipboardService, cliExecutable: URL? = nil, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.backend = backend
         self.clipboard = clipboard
+        self.cliExecutable = cliExecutable
         self.clock = clock
         lastActivity = clock()
     }
@@ -57,17 +62,22 @@ public final class VaultStore: ObservableObject {
     }
 
     public func start() async {
-        guard phase == .checking || phase == .setup else { return }
+        guard (phase == .checking || phase == .setup), !isWorking else { return }
         guard let backend else {
+            requiresLogin = false
             phase = .setup
             errorMessage = "未找到可用的 Bitwarden CLI，请安装后重新打开应用。"
             return
         }
         let token = generation
+        isWorking = true
+        activityMessage = "正在检查密码库…"
+        defer { if generation == token { isWorking = false; activityMessage = nil } }
         do {
             _ = try await backend.version()
         } catch {
             guard generation == token else { return }
+            requiresLogin = false
             phase = .setup
             errorMessage = "Bitwarden CLI 无法运行或返回了无效版本，请检查安装后重试。"
             return
@@ -76,13 +86,96 @@ public final class VaultStore: ObservableObject {
         do {
             let status = try await backend.status()
             guard generation == token else { return }
+            requiresLogin = status == .unauthenticated
             phase = status == .unauthenticated ? .setup : .locked
             errorMessage = nil
         } catch {
             guard generation == token else { return }
+            requiresLogin = false
             phase = .setup
             errorMessage = "无法读取密码库状态，请检查 CLI 和独立目录后重试。"
         }
+    }
+
+    public func login(server: VaultServer, email: String, masterPassword: String, method: CLITwoFactorMethod, expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
+        guard phase == .setup, requiresLogin, !isWorking, !masterPassword.isEmpty, let backend else { return }
+        generation &+= 1
+        let token = generation
+        let dialogue: CLILoginDialogue
+        do {
+            dialogue = try CLILoginDialogue(email: email, onChallenge: { [weak self] challenge in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == token, self.phase == .signingIn else { return }
+                    self.loginChallenge = challenge
+                    self.activityMessage = "等待验证…"
+                }
+            })
+        } catch { errorMessage = "请输入有效的邮箱地址。"; return }
+        loginDialogue = dialogue
+        phase = .signingIn
+        isWorking = true
+        activityMessage = "正在连接账号…"
+        errorMessage = nil
+        notice = nil
+        var releasedWork = false
+        defer { if generation == token, !releasedWork { isWorking = false; activityMessage = nil } }
+        do {
+            try await backend.login(server: server, masterPassword: masterPassword, method: method, dialogue: dialogue)
+            guard generation == token, phase == .signingIn else { return }
+            loginDialogue = nil
+            loginChallenge = nil
+            requiresLogin = false
+            phase = .unlocked
+            activityMessage = "正在读取记录…"
+            let loaded = try await backend.items()
+            guard generation == token, phase == .unlocked else { return }
+            items = loaded
+            indexRevision &+= 1
+            isWorking = false
+            activityMessage = nil
+            releasedWork = true
+            await loadFolders(backend, token: token)
+            guard generation == token, phase == .unlocked else { return }
+            userDidInteract()
+        } catch {
+            guard generation == token else { return }
+            loginDialogue = nil
+            loginChallenge = nil
+            if phase == .unlocked {
+                errorMessage = "账号已连接，但记录读取失败。请重试同步。"
+                return
+            }
+            let state = await backend.state
+            guard generation == token else { return }
+            if state == .lockFailed {
+                phase = .lockFailed
+                errorMessage = Self.lockFailure
+                return
+            }
+            phase = .setup
+            isWorking = false
+            activityMessage = nil
+            await start()
+            guard generation == token else { return }
+            if requiresLogin {
+                errorMessage = error as? CLILoginError == .unsupportedChallenge
+                    ? "此认证方式需要终端完成，请使用终端登录入口。"
+                    : "登录失败，请检查账号信息、服务器和验证码后重试。"
+            } else if phase == .locked { showNotice("账号已连接，请输入主密码解锁") }
+        }
+    }
+
+    public func submitLoginResponse(_ response: String) {
+        guard phase == .signingIn, loginChallenge != nil, loginDialogue?.submit(response) == true else { return }
+        loginChallenge = nil
+        activityMessage = "正在验证…"
+    }
+
+    public func copyLoginCommand(_ command: String) {
+        guard phase == .setup, requiresLogin else { return }
+        do { try clipboard.copy(command); showNotice("终端登录命令已复制") }
+        catch { errorMessage = "无法写入剪贴板，请重试。" }
     }
 
     public func unlock(masterPassword: String, expectedGeneration: UInt64? = nil) async {
@@ -273,9 +366,12 @@ public final class VaultStore: ObservableObject {
     @discardableResult
     public func lock() -> Task<Void, Never> {
         if let locking { return locking }
-        let needsBackend = phase == .unlocked || phase == .unlocking || phase == .lockFailed
+        let wasSigningIn = phase == .signingIn
+        let needsBackend = phase == .unlocked || phase == .unlocking || phase == .lockFailed || wasSigningIn
         generation &+= 1
         let token = generation
+        loginDialogue = nil
+        loginChallenge = nil
         items.removeAll()
         folders.removeAll()
         folderFilter = .all
@@ -296,6 +392,10 @@ public final class VaultStore: ObservableObject {
                 try await backend.lock()
                 guard let self, self.generation == token else { return }
                 self.phase = .locked
+                if wasSigningIn {
+                    self.phase = .setup
+                    await self.start()
+                }
             } catch {
                 guard let self, self.generation == token else { return }
                 self.phase = .lockFailed
