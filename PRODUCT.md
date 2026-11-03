@@ -26,6 +26,8 @@ Official CLI backend with an independent local authentication/data directory. Fi
 
 This milestone covers personal login items, metadata search, folder filtering, direct username/password/authenticator-code copy, manual sync/lock, clipboard clearing and automatic lock. Existing Bitwarden stars are shown on entries; the app does not edit them or expose a separate favorites filter. No server writes, biometric unlock or global shortcut yet. Master password and Session are never persisted or logged. Authenticator seeds stay out of the metadata index. Raw CLI output is never exposed as an error.
 
+The owner approved a desktop memory-snapshot trial on 2026-11-03: supported login passwords and authenticator seeds remain private to the vault actor during the unlocked session. Password copies and local HMAC code generation do not invoke the CLI. Lock and refresh revoke the snapshot; no plaintext persistence is introduced, and Swift does not guarantee complete memory zeroization. Snapshot protection reflects the last successful indexing, so server-side changes require sync. The diagnostic tool keeps on-demand CLI reads and protection rechecks. Folder metadata may finish loading after copies become usable. Unlock and backend lock confirmation still require CLI operations.
+
 ## Brand Commitments
 
 WardenBar is an independent community client. The approved design uses native macOS controls and a compact MenuBarExtra window. Product facts derive from the conversation and workspace docs/design.md; this file does not introduce a new visual direction.
