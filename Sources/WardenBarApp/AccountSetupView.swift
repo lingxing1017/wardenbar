@@ -137,8 +137,10 @@ struct AccountSetupView: View {
                     .help("选择 Bitwarden 区域或自托管服务器")
             }
             .frame(height: 26)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1).allowsHitTesting(false) }
+            .background {
+                NativeTextFieldBezel(isFocused: focus == .server)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
             if serverSelection.choice == .custom && !serverSelection.customAddress.isEmpty && server == nil {
                 Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
                     .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
