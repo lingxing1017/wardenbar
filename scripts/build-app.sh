@@ -22,9 +22,21 @@ swift build -c release --product WardenBar -debug-info-format none \
 scripts/verify-sdk.sh .build/release/WardenBar "$minimum_macos" "$build_sdk_version"
 
 app_bundle="$app_root/.build/WardenBar.app"
-mkdir -p "$app_bundle/Contents/MacOS"
+icon_build="$app_root/.build/app-icon"
+mkdir -p "$app_bundle/Contents/MacOS" "$app_bundle/Contents/Resources" "$icon_build"
 cp .build/release/WardenBar "$app_bundle/Contents/MacOS/WardenBar"
 cp App/Info.plist "$app_bundle/Contents/Info.plist"
+
+# Compile appearance variants and the legacy icon using Apple's asset pipeline.
+xcrun actool App/WardenBar.icon \
+    --compile "$icon_build" \
+    --output-format human-readable-text --notices --warnings --errors \
+    --app-icon WardenBar --platform macosx --target-device mac \
+    --minimum-deployment-target "$minimum_macos" \
+    --output-partial-info-plist "$icon_build/icon-info.plist"
+cp "$icon_build/Assets.car" "$icon_build/WardenBar.icns" "$app_bundle/Contents/Resources/"
+/usr/libexec/PlistBuddy -c "Merge \"$icon_build/icon-info.plist\"" "$app_bundle/Contents/Info.plist"
+
 scripts/verify-sdk.sh "$app_bundle/Contents/MacOS/WardenBar" "$minimum_macos" "$build_sdk_version"
 codesign --force --sign - --timestamp=none "$app_bundle"
 codesign --verify --deep --strict "$app_bundle"
