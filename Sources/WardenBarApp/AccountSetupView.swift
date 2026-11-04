@@ -51,9 +51,9 @@ struct AccountSetupView: View {
                     Text("完成验证后，即可打开密码库。")
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
-                    Picker("登录方式", selection: $mode) {
-                        ForEach(AccountLoginMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }.labelsHidden().pickerStyle(.segmented).disabled(store.isWorking)
+                    LoginModeSwitch(selection: $mode)
+                        .frame(maxWidth: .infinity).frame(height: 26)
+                        .disabled(store.isWorking)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16).padding(.top, 16)
