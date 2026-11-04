@@ -3,8 +3,8 @@ set -euo pipefail
 
 app_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$app_root"
-# Source once in this build shell. Failure stops before building.
-source .superpowers/sdd/env.sh
+# Keep clean checkouts independent of local agent tooling.
+source scripts/env.sh
 
 build_sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
 build_sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
