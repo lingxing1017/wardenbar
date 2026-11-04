@@ -1,0 +1,92 @@
+name: package mac app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-mac-app
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run tests
+        run: |
+          source scripts/env.sh
+          swift test
+
+      - name: Package app
+        run: |
+          test "$(uname -m)" = arm64
+          scripts/build-app.sh
+
+      - name: Zip app
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            .build/WardenBar.app dist/WardenBar-macOS-arm64.zip
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wardenbar-macos-arm64
+          path: dist/WardenBar-macOS-arm64.zip
+          if-no-files-found: error
+
+      - name: Prepare daily release tag
+        id: release
+        run: |
+          release_date="$(TZ=Asia/Hong_Kong date +%Y.%m.%d)"
+          echo "tag_name=macos-$release_date" >> "$GITHUB_OUTPUT"
+          echo "release_name=WardenBar macOS $release_date" >> "$GITHUB_OUTPUT"
+
+      - name: Move daily release tag
+        env:
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: |
+          git tag -f "$TAG_NAME" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$TAG_NAME"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+          RELEASE_NAME: ${{ steps.release.outputs.release_name }}
+        run: |
+          cat > dist/release-notes.md <<'EOF'
+          Download WardenBar-macOS-arm64.zip for Apple Silicon Macs running macOS 13 or later.
+
+          Install the official Bitwarden CLI separately; it is not included in this archive.
+
+          This app uses an ad-hoc signature and is not notarized by Apple. macOS may block its first launch.
+          EOF
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "$RELEASE_NAME" \
+              --notes-file dist/release-notes.md
+            gh release upload "$TAG_NAME" dist/WardenBar-macOS-arm64.zip --clobber
+          else
+            gh release create "$TAG_NAME" dist/WardenBar-macOS-arm64.zip \
+              --verify-tag \
+              --title "$RELEASE_NAME" \
+              --notes-file dist/release-notes.md
+          fi
