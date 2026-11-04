@@ -1,0 +1,47 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": false,
+          "name": "password-cover",
+          "fill-specializations": [
+            {
+              "value": "none"
+            },
+            {
+              "appearance": "dark",
+              "value": "none"
+            }
+          ],
+          "image-name-specializations": [
+            {
+              "value": "wardenbar-light.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "wardenbar-dark.png"
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}
