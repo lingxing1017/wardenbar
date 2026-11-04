@@ -41,6 +41,7 @@ struct AccountSetupView: View {
         guard let executable = store.cliExecutable, let server else { return nil }
         return TerminalLoginCommand.make(executable: executable, dataDirectory: dataDirectory, server: server, method: terminalMethod)
     }
+    private var canCheckLogin: Bool { terminalCommand != nil && !store.isWorking }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -101,7 +102,7 @@ struct AccountSetupView: View {
                     Text(mode == .app ? "连接账号" : "检查登录")
                 }.frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(mode == .app ? !canConnect : store.isWorking)
+                .disabled(mode == .app ? !canConnect : !canCheckLogin)
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("accountPrimaryAction")
         }.padding(.horizontal, 16).padding(.bottom, 16)
@@ -184,7 +185,7 @@ struct AccountSetupView: View {
     }
 
     private func checkLogin() {
-        guard mode == .terminal, !store.isWorking else { return }
+        guard mode == .terminal, canCheckLogin else { return }
         let generation = store.generation
         Task {
             guard mode == .terminal else { return }
