@@ -95,11 +95,20 @@ final class NativeRenderTests: XCTestCase {
 
     func testFirstRunAndKnownChallengeFormsRenderWithSyntheticData() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        let explanations = [false, true].map { valid in
+            NSHostingView(rootView: TerminalLoginExplanation(serverIsValid: valid).frame(width: PopoverWidth.minimum - 32))
+        }
+        for view in explanations { view.layoutSubtreeIfNeeded() }
+        XCTAssertGreaterThan(explanations[0].fittingSize.height, 0)
+        XCTAssertEqual(explanations[0].fittingSize.height, explanations[1].fittingSize.height, accuracy: 0.5)
         for canCopy in [false, true] {
-            let actions = TerminalLoginActions(method: .constant(.apiKey), canCopy: canCopy, onCopy: {})
-                .padding(16).frame(width: PopoverWidth.minimum, height: 72)
+            let actions = VStack(alignment: .leading, spacing: 10) {
+                TerminalLoginExplanation(serverIsValid: canCopy)
+                TerminalLoginActions(method: .constant(.apiKey), canCopy: canCopy, onCopy: {})
+            }
+                .padding(16).frame(width: PopoverWidth.minimum, height: 120)
                 .background(Color(nsColor: .windowBackgroundColor))
-            try await renderView(actions, name: canCopy ? "terminal-copy-enabled" : "terminal-copy-disabled", dark: !canCopy, width: PopoverWidth.minimum, height: 72)
+            try await renderView(actions, name: canCopy ? "terminal-copy-enabled" : "terminal-copy-disabled", dark: !canCopy, width: PopoverWidth.minimum, height: 120)
         }
         for challenge: CLILoginChallenge in [.twoFactor, .newDevice, .clientSecret] {
             let board = NSPasteboard(name: .init("WardenBarOnboard-" + UUID().uuidString))

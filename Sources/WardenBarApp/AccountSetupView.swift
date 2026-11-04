@@ -133,8 +133,7 @@ struct AccountSetupView: View {
     private var terminalFallback: some View {
         DisclosureGroup("其他登录方式（终端）") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("特殊认证可在终端完成，之后回来检查登录状态。")
-                    .font(.callout).foregroundStyle(.secondary)
+                TerminalLoginExplanation(serverIsValid: server != nil)
                 TerminalLoginActions(method: $terminalMethod, canCopy: terminalCommand != nil) {
                     if let command = terminalCommand { store.copyLoginCommand(command) }
                 }
