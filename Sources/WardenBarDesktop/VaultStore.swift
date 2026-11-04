@@ -10,6 +10,7 @@ public final class VaultStore: ObservableObject {
     @Published public private(set) var phase: VaultPhase = .checking
     @Published public private(set) var requiresLogin = false
     @Published public private(set) var loginChallenge: CLILoginChallenge?
+    @Published public private(set) var loginCheckMessage: String?
     public let cliExecutable: URL?
     @Published public private(set) var items: [VaultItemSummary] = []
     @Published public private(set) var folders: [VaultFolder] = []
@@ -63,6 +64,7 @@ public final class VaultStore: ObservableObject {
 
     public func start() async {
         guard (phase == .checking || phase == .setup), !isWorking else { return }
+        loginCheckMessage = nil
         guard let backend else {
             requiresLogin = false
             phase = .setup
@@ -97,9 +99,21 @@ public final class VaultStore: ObservableObject {
         }
     }
 
+    public func checkLogin(expectedGeneration: UInt64? = nil) async {
+        if let expectedGeneration, expectedGeneration != generation { return }
+        guard phase == .setup, requiresLogin, !isWorking else { return }
+        let token = generation
+        await start()
+        guard generation == token, phase == .setup, requiresLogin, errorMessage == nil else { return }
+        loginCheckMessage = "尚未登录，请先在终端完成登录"
+    }
+
+    public func dismissLoginCheckMessage() { loginCheckMessage = nil }
+
     public func login(server: VaultServer, email: String, masterPassword: String, method: CLITwoFactorMethod, expectedGeneration: UInt64? = nil) async {
         if let expectedGeneration, expectedGeneration != generation { return }
         guard phase == .setup, requiresLogin, !isWorking, !masterPassword.isEmpty, let backend else { return }
+        loginCheckMessage = nil
         generation &+= 1
         let token = generation
         let dialogue: CLILoginDialogue
@@ -372,6 +386,7 @@ public final class VaultStore: ObservableObject {
         let token = generation
         loginDialogue = nil
         loginChallenge = nil
+        loginCheckMessage = nil
         items.removeAll()
         folders.removeAll()
         folderFilter = .all
