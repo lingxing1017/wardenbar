@@ -26,6 +26,7 @@ icon_build="$app_root/.build/app-icon"
 mkdir -p "$app_bundle/Contents/MacOS" "$app_bundle/Contents/Resources" "$icon_build"
 cp .build/release/WardenBar "$app_bundle/Contents/MacOS/WardenBar"
 cp App/Info.plist "$app_bundle/Contents/Info.plist"
+cp -R .build/release/WardenBar_WardenBarApp.bundle "$app_bundle/Contents/Resources/"
 
 # Compile appearance variants and the legacy icon using Apple's asset pipeline.
 xcrun actool App/WardenBar.icon \
