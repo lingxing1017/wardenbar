@@ -13,7 +13,8 @@ let package = Package(
     targets: [
         .target(name: "WardenBarCore"),
         .target(name: "WardenBarDesktop", dependencies: ["WardenBarCore"]),
-        .executableTarget(name: "WardenBarApp", dependencies: ["WardenBarCore", "WardenBarDesktop"]),
+        .executableTarget(name: "WardenBarApp", dependencies: ["WardenBarCore", "WardenBarDesktop"],
+                          resources: [.process("Resources")]),
         .executableTarget(name: "WardenBarCheck", dependencies: ["WardenBarCore"]),
         .testTarget(
             name: "WardenBarCoreTests", dependencies: ["WardenBarCore"],
