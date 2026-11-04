@@ -20,6 +20,23 @@ private struct LiveWidthHarness: View {
 }
 
 @MainActor
+private final class LoginModePreference: ObservableObject {
+    @Published var mode = AccountLoginMode.app
+    @Published var server = AccountServerSelection(choice: .custom, customAddress: "")
+}
+
+@MainActor
+private struct LoginModeHarness: View {
+    @ObservedObject var preference: LoginModePreference
+    let store: VaultStore
+    var body: some View {
+        AccountSetupView(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), mode: $preference.mode, serverSelection: $preference.server)
+            .frame(width: 280, height: 424)
+            .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+@MainActor
 final class NativeRenderTests: XCTestCase {
     func testLiveWidthChangesResizeThePanelInsteadOfClippingItsContent() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -134,6 +151,54 @@ final class NativeRenderTests: XCTestCase {
         }
     }
 
+    func testLoginModeSwitchRetainsEmailAndClearsMasterPassword() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let board = NSPasteboard(name: .init("WardenBarLoginModes-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        let store = VaultStore(backend: backend, clipboard: ClipboardService(pasteboard: board), cliExecutable: URL(fileURLWithPath: "/synthetic/bw"))
+        await store.start()
+        let preference = LoginModePreference()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 424), styleMask: .borderless, backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        let host = NSHostingView(rootView: LoginModeHarness(preference: preference, store: store).environment(\.colorScheme, .dark))
+        window.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 280, height: 424)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+        func fields() -> [NSTextField] { all(host).compactMap { $0 as? NSTextField } }
+        let address = try XCTUnwrap(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" })
+        address.stringValue = "https://vault.example.com"
+        address.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: address))
+        let email = try XCTUnwrap(fields().first { $0.placeholderString == "电子邮箱" })
+        let password = try XCTUnwrap(fields().first { $0.placeholderString == "主密码" })
+        email.stringValue = "synthetic@example.invalid"
+        email.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: email))
+        password.stringValue = "synthetic-master"
+        password.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: password))
+        preference.mode = .terminal
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertFalse(fields().contains { $0.placeholderString == "主密码" })
+        XCTAssertEqual(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" }?.stringValue, "https://vault.example.com")
+        try capture(host, name: "login-mode-terminal")
+        await store.checkLogin()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        try capture(host, name: "login-mode-terminal-result")
+        preference.mode = .app
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(fields().first { $0.placeholderString == "电子邮箱" }?.stringValue, "synthetic@example.invalid")
+        XCTAssertEqual(fields().first { $0.placeholderString == "主密码" }?.stringValue, "")
+        XCTAssertEqual(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" }?.stringValue, "https://vault.example.com")
+        try capture(host, name: "login-mode-app")
+        XCTAssertNil(store.loginCheckMessage)
+    }
+
     private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue, policy: AutoLockPolicy = .idle(minutes: 5)) async throws {
         let view = ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: .constant(width), lockPolicy: .constant(policy))
         try await renderView(view, name: name, dark: dark, width: width, height: 520)
@@ -149,6 +214,11 @@ final class NativeRenderTests: XCTestCase {
         XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 0.5)
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
+        try capture(host, name: name)
+        window.orderOut(nil)
+    }
+
+    private func capture(_ host: NSView, name: String) throws {
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
@@ -157,6 +227,5 @@ final class NativeRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         try png.write(to: output.appendingPathComponent("\(name).png"))
         XCTAssertGreaterThan(bitmap.pixelsWide, 0)
-        window.orderOut(nil)
     }
 }

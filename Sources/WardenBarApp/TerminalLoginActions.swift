@@ -3,7 +3,7 @@ import WardenBarDesktop
 
 struct TerminalLoginExplanation: View {
     let serverIsValid: Bool
-    private let explanation = "特殊认证可在终端完成，之后回来检查登录状态。"
+    private let explanation = "在终端完成登录后，回来检查登录状态。"
 
     var body: some View {
         // Measure the longer explanation even when showing the shorter validation hint.
@@ -43,5 +43,19 @@ struct TerminalLoginActions: View {
             .help(canCopy ? "复制在终端执行的登录命令" : "请先填写有效的服务器地址")
             Spacer(minLength: 0)
         }
+    }
+}
+
+struct LoginCheckFeedback: View {
+    let message: String?
+
+    var body: some View {
+        Text(message ?? "尚未登录，请先在终端完成登录")
+            .font(.caption).foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .opacity(message == nil ? 0 : 1)
+            .accessibilityHidden(message == nil)
     }
 }

@@ -2,12 +2,31 @@ import SwiftUI
 import WardenBarCore
 import WardenBarDesktop
 
+enum AccountLoginMode: String, CaseIterable {
+    case app = "应用内登录", terminal = "终端登录"
+}
+
+struct AccountServerSelection {
+    enum Choice: String, CaseIterable {
+        case us = "Bitwarden 美国", eu = "Bitwarden 欧洲", custom = "自托管"
+    }
+    var choice = Choice.us
+    var customAddress = ""
+    var server: VaultServer? {
+        switch choice {
+        case .us: return .us
+        case .eu: return .eu
+        case .custom: return try? VaultServer(address: customAddress)
+        }
+    }
+}
+
 @MainActor
 struct AccountSetupView: View {
     @ObservedObject var store: VaultStore
     let dataDirectory: URL
-    @State private var serverChoice = ServerChoice.us
-    @State private var customServer = ""
+    @Binding var mode: AccountLoginMode
+    @Binding var serverSelection: AccountServerSelection
     @State private var email = ""
     @State private var password = ""
     @State private var response = ""
@@ -15,51 +34,53 @@ struct AccountSetupView: View {
     @State private var terminalMethod = TerminalLoginMethod.standard
     @FocusState private var focus: Field?
     private enum Field { case email, password, response, server }
-    private enum ServerChoice: String, CaseIterable {
-        case us = "Bitwarden 美国", eu = "Bitwarden 欧洲", custom = "自托管"
-    }
-    private var server: VaultServer? {
-        switch serverChoice {
-        case .us: return .us
-        case .eu: return .eu
-        case .custom: return try? VaultServer(address: customServer)
-        }
-    }
+    private var server: VaultServer? { serverSelection.server }
     private var signingIn: Bool { store.phase == .signingIn }
-    private var canConnect: Bool { server != nil && email.contains("@") && !password.isEmpty && !store.isWorking }
+    private var canConnect: Bool { mode == .app && server != nil && email.contains("@") && !password.isEmpty && !store.isWorking }
     private var terminalCommand: String? {
         guard let executable = store.cliExecutable, let server else { return nil }
         return TerminalLoginCommand.make(executable: executable, dataDirectory: dataDirectory, server: server, method: terminalMethod)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("连接密码库").font(.title2.weight(.semibold))
-                    Text(signingIn ? "完成验证后，即可打开密码库。" : "登录现有账号，以后启动只需解锁。")
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("连接密码库").font(.title2.weight(.semibold))
+                if signingIn {
+                    Text("完成验证后，即可打开密码库。")
                         .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    Picker("登录方式", selection: $mode) {
+                        ForEach(AccountLoginMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }.labelsHidden().pickerStyle(.segmented).disabled(store.isWorking)
                 }
-                if signingIn { loginProgress }
-                else {
-                    credentials
-                    Button(action: connect) {
-                        HStack(spacing: 8) {
-                            if store.isWorking { ProgressView().controlSize(.small) }
-                            Text("连接账号")
-                        }.frame(maxWidth: .infinity)
-                    }.buttonStyle(.borderedProminent).controlSize(.large)
-                        .disabled(!canConnect)
-                        .keyboardShortcut(.defaultAction)
-                    if store.cliExecutable != nil {
-                        Divider()
-                        terminalFallback
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.top, 16)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if signingIn { loginProgress }
+                    else {
+                        serverFields
+                        if mode == .app { credentials }
+                        else { terminalFields }
                     }
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            }.id(mode).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !signingIn { primaryAction }
         }
-        .onAppear { focus = .email }
-        .onChange(of: serverChoice) { choice in if choice == .custom { focus = .server } }
+        .onAppear { focus = mode == .app ? .email : nil }
+        .onChange(of: mode) { value in
+            password = ""
+            response = ""
+            store.dismissLoginCheckMessage()
+            focus = value == .app ? .email : nil
+        }
+        .onChange(of: serverSelection.choice) { choice in
+            store.dismissLoginCheckMessage()
+            if choice == .custom { focus = .server }
+        }
+        .onChange(of: serverSelection.customAddress) { _ in store.dismissLoginCheckMessage() }
+        .onChange(of: terminalMethod) { _ in store.dismissLoginCheckMessage() }
         .onChange(of: store.loginChallenge) { challenge in
             response = ""
             focus = challenge == nil ? nil : .response
@@ -68,23 +89,44 @@ struct AccountSetupView: View {
         .onDisappear { password = ""; response = "" }
     }
 
-    private var credentials: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("服务器").font(.caption).foregroundStyle(.secondary)
-                Picker("服务器", selection: $serverChoice) {
-                    ForEach(ServerChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.labelsHidden().pickerStyle(.menu)
-                if serverChoice == .custom {
-                    TextField("https://vault.example.com", text: $customServer)
-                        .textFieldStyle(.roundedBorder).focused($focus, equals: .server)
-                        .accessibilityLabel("自托管服务器地址")
-                    if !customServer.isEmpty && server == nil {
-                        Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
-                            .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                    }
+    private var primaryAction: some View {
+        VStack(spacing: 8) {
+            LoginCheckFeedback(message: mode == .terminal ? store.loginCheckMessage : nil)
+            Button {
+                if mode == .app { connect() }
+                else { checkLogin() }
+            } label: {
+                HStack(spacing: 8) {
+                    if store.isWorking { ProgressView().controlSize(.small) }
+                    Text(mode == .app ? "连接账号" : "检查登录")
+                }.frame(maxWidth: .infinity)
+            }.buttonStyle(.borderedProminent).controlSize(.large)
+                .disabled(mode == .app ? !canConnect : store.isWorking)
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("accountPrimaryAction")
+        }.padding(.horizontal, 16).padding(.bottom, 16)
+    }
+
+    private var serverFields: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("服务器").font(.caption).foregroundStyle(.secondary)
+            Picker("服务器", selection: $serverSelection.choice) {
+                ForEach(AccountServerSelection.Choice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.labelsHidden().pickerStyle(.menu)
+            if serverSelection.choice == .custom {
+                TextField("https://vault.example.com", text: $serverSelection.customAddress)
+                    .textFieldStyle(.roundedBorder).focused($focus, equals: .server)
+                    .accessibilityLabel("自托管服务器地址")
+                if !serverSelection.customAddress.isEmpty && server == nil {
+                    Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
+                        .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }.disabled(store.isWorking)
+    }
+
+    private var credentials: some View {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("电子邮箱").font(.caption).foregroundStyle(.secondary)
                 TextField("电子邮箱", text: $email).textFieldStyle(.roundedBorder)
@@ -130,18 +172,24 @@ struct AccountSetupView: View {
         }
     }
 
-    private var terminalFallback: some View {
-        DisclosureGroup("其他登录方式（终端）") {
-            VStack(alignment: .leading, spacing: 10) {
-                TerminalLoginExplanation(serverIsValid: server != nil)
-                TerminalLoginActions(method: $terminalMethod, canCopy: terminalCommand != nil) {
-                    if let command = terminalCommand { store.copyLoginCommand(command) }
-                }
-                Button("已完成，检查登录状态") { Task { await store.start() } }
-                Text("使用本应用的独立目录，不会复用终端默认的账号资料。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(.top, 8)
+    private var terminalFields: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TerminalLoginExplanation(serverIsValid: server != nil)
+            TerminalLoginActions(method: $terminalMethod, canCopy: terminalCommand != nil) {
+                if let command = terminalCommand { store.copyLoginCommand(command) }
+            }
+            Text("命令使用本应用的独立目录。")
+                .font(.caption).foregroundStyle(.secondary)
         }.disabled(store.isWorking)
+    }
+
+    private func checkLogin() {
+        guard mode == .terminal, !store.isWorking else { return }
+        let generation = store.generation
+        Task {
+            guard mode == .terminal else { return }
+            await store.checkLogin(expectedGeneration: generation)
+        }
     }
 
     private func challengeTitle(_ challenge: CLILoginChallenge) -> String {
@@ -165,7 +213,10 @@ struct AccountSetupView: View {
         let selectedMethod = method
         let generation = store.generation
         password = ""
-        Task { await store.login(server: server, email: address, masterPassword: master, method: selectedMethod, expectedGeneration: generation) }
+        Task {
+            guard mode == .app else { return }
+            await store.login(server: server, email: address, masterPassword: master, method: selectedMethod, expectedGeneration: generation)
+        }
     }
     private func submitResponse() {
         let value = response
