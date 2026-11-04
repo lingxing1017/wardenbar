@@ -13,10 +13,11 @@ final class PasswordCoverArtworkTests: XCTestCase {
 
     func testMenuBarStatesRemainDistinctTemplatesWithStableSize() throws {
         let images = PasswordCoverState.allCases.map(PasswordCoverArtwork.menuBar)
-        XCTAssertTrue(images.allSatisfy { $0.isTemplate && $0.size == NSSize(width: 24, height: 18) })
+        XCTAssertTrue(images.allSatisfy { $0.isTemplate && $0.size == NSSize(width: 20, height: 18) })
         let data = try images.map { try XCTUnwrap($0.tiffRepresentation) }
         XCTAssertEqual(Set(data).count, 3)
         XCTAssertFalse(PasswordCoverArtwork.header.isTemplate)
+        XCTAssertEqual(PasswordCoverArtwork.header.size, NSSize(width: 28, height: 20))
     }
 
     func testOnlyUnlockedPhaseUsesOpenCoverAndFailedLockUsesWarning() {
