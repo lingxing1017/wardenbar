@@ -9,6 +9,13 @@ enum AccountLoginMode: String, CaseIterable {
 struct AccountServerSelection {
     enum Choice: String, CaseIterable {
         case us = "Bitwarden 美国", eu = "Bitwarden 欧洲", custom = "自托管"
+        var compactTitle: String {
+            switch self {
+            case .us: return "美国"
+            case .eu: return "欧洲"
+            case .custom: return "自托管"
+            }
+        }
     }
     var choice = Choice.us
     var customAddress = ""
@@ -42,6 +49,12 @@ struct AccountSetupView: View {
         return TerminalLoginCommand.make(executable: executable, dataDirectory: dataDirectory, server: server, method: terminalMethod)
     }
     private var canCheckLogin: Bool { terminalCommand != nil && !store.isWorking }
+    private var serverAddress: Binding<String> {
+        Binding(
+            get: { serverSelection.choice == .custom ? serverSelection.customAddress : (server?.url.absoluteString ?? "") },
+            set: { if serverSelection.choice == .custom { serverSelection.customAddress = $0 } }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,7 +91,7 @@ struct AccountSetupView: View {
         }
         .onChange(of: serverSelection.choice) { choice in
             store.dismissLoginCheckMessage()
-            if choice == .custom { focus = .server }
+            focus = choice == .custom ? .server : nil
         }
         .onChange(of: serverSelection.customAddress) { _ in store.dismissLoginCheckMessage() }
         .onChange(of: terminalMethod) { _ in store.dismissLoginCheckMessage() }
@@ -111,17 +124,19 @@ struct AccountSetupView: View {
     private var serverFields: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("服务器").font(.caption).foregroundStyle(.secondary)
-            Picker("服务器", selection: $serverSelection.choice) {
-                ForEach(AccountServerSelection.Choice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.labelsHidden().pickerStyle(.menu)
-            if serverSelection.choice == .custom {
-                TextField("https://vault.example.com", text: $serverSelection.customAddress)
+            HStack(spacing: 8) {
+                Picker("服务器区域", selection: $serverSelection.choice) {
+                    ForEach(AccountServerSelection.Choice.allCases, id: \.self) { Text($0.compactTitle).tag($0) }
+                }.labelsHidden().pickerStyle(.menu).frame(width: 82)
+                TextField("https://vault.example.com", text: serverAddress)
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .server)
-                    .accessibilityLabel("自托管服务器地址")
-                if !serverSelection.customAddress.isEmpty && server == nil {
-                    Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
-                        .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                }
+                    .accessibilityLabel(serverSelection.choice == .custom ? "自托管服务器地址" : "服务器地址，只读")
+                    .disabled(serverSelection.choice != .custom)
+                    .frame(maxWidth: .infinity)
+            }
+            if serverSelection.choice == .custom && !serverSelection.customAddress.isEmpty && server == nil {
+                Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
+                    .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
         }.disabled(store.isWorking)
     }
