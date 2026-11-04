@@ -138,7 +138,7 @@ struct AccountSetupView: View {
             }
             .frame(height: 26)
             .background {
-                NativeTextFieldBezel(isFocused: focus == .server)
+                AccountInputBackground(isFocused: focus == .server)
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
             if serverSelection.choice == .custom && !serverSelection.customAddress.isEmpty && server == nil {
@@ -152,13 +152,17 @@ struct AccountSetupView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("电子邮箱").font(.caption).foregroundStyle(.secondary)
-                TextField("电子邮箱", text: $email).textFieldStyle(.roundedBorder)
+                TextField("电子邮箱", text: $email).textFieldStyle(.plain)
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .background { AccountInputBackground(isFocused: focus == .email) }
                     .focused($focus, equals: .email)
                     .onSubmit { focus = .password }
             }
             VStack(alignment: .leading, spacing: 5) {
                 Text("主密码").font(.caption).foregroundStyle(.secondary)
-                SecureField("主密码", text: $password).textFieldStyle(.roundedBorder)
+                SecureField("主密码", text: $password).textFieldStyle(.plain)
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .background { AccountInputBackground(isFocused: focus == .password) }
                     .textContentType(.password).focused($focus, equals: .password).onSubmit(connect)
             }
             VStack(alignment: .leading, spacing: 5) {
@@ -179,7 +183,10 @@ struct AccountSetupView: View {
                     Text(challengeTitle(challenge)).font(.headline)
                     Text(challengeHelp(challenge)).font(.callout).foregroundStyle(.secondary)
                     SecureField(challenge == .clientSecret ? "client_secret" : "验证码", text: $response)
-                        .textFieldStyle(.roundedBorder).focused($focus, equals: .response)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 8).frame(height: 26)
+                        .background { AccountInputBackground(isFocused: focus == .response) }
+                        .focused($focus, equals: .response)
                         .textContentType(challenge == .clientSecret ? .password : .oneTimeCode)
                         .onSubmit(submitResponse)
                     Button("继续验证", action: submitResponse).buttonStyle(.borderedProminent)
