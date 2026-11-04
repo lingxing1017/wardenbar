@@ -176,9 +176,35 @@ final class NativeRenderTests: XCTestCase {
         let bezel = try XCTUnwrap(modeControl.selectedSegmentBezelColor?.usingColorSpace(.deviceRGB))
         XCTAssertEqual(bezel.redComponent, bezel.greenComponent, accuracy: 0.001)
         XCTAssertEqual(bezel.greenComponent, bezel.blueComponent, accuracy: 0.001)
+        modeControl.selectedSegment = 1
+        _ = modeControl.sendAction(modeControl.action, to: modeControl.target)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        try capture(host, name: "login-mode-invalid-server")
+        modeControl.selectedSegment = 0
+        _ = modeControl.sendAction(modeControl.action, to: modeControl.target)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
         let address = try XCTUnwrap(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" })
         address.stringValue = "https://vault.example.com"
         address.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: address))
+        let addressY = address.convert(address.bounds, to: host).minY
+        for choice: AccountServerSelection.Choice in [.us, .eu] {
+            preference.server.choice = choice
+            try await Task.sleep(nanoseconds: 100_000_000)
+            host.layoutSubtreeIfNeeded()
+            let official = try XCTUnwrap(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" })
+            XCTAssertFalse(official.isEnabled)
+            XCTAssertEqual(official.stringValue, preference.server.server?.url.absoluteString)
+            XCTAssertEqual(official.convert(official.bounds, to: host).minY, addressY, accuracy: 0.5)
+        }
+        preference.server.choice = .custom
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        let custom = try XCTUnwrap(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" })
+        XCTAssertTrue(custom.isEnabled)
+        XCTAssertEqual(custom.stringValue, "https://vault.example.com")
+        XCTAssertEqual(custom.convert(custom.bounds, to: host).minY, addressY, accuracy: 0.5)
         let email = try XCTUnwrap(fields().first { $0.placeholderString == "电子邮箱" })
         let password = try XCTUnwrap(fields().first { $0.placeholderString == "主密码" })
         email.stringValue = "synthetic@example.invalid"
