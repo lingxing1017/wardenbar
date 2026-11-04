@@ -27,6 +27,10 @@ struct AccountSetupView: View {
     }
     private var signingIn: Bool { store.phase == .signingIn }
     private var canConnect: Bool { server != nil && email.contains("@") && !password.isEmpty && !store.isWorking }
+    private var terminalCommand: String? {
+        guard let executable = store.cliExecutable, let server else { return nil }
+        return TerminalLoginCommand.make(executable: executable, dataDirectory: dataDirectory, server: server, method: terminalMethod)
+    }
 
     var body: some View {
         ScrollView {
@@ -131,17 +135,9 @@ struct AccountSetupView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("特殊认证可在终端完成，之后回来检查登录状态。")
                     .font(.callout).foregroundStyle(.secondary)
-                Picker("终端登录方式", selection: $terminalMethod) {
-                    Text("交互登录").tag(TerminalLoginMethod.standard)
-                    Text("API Key").tag(TerminalLoginMethod.apiKey)
-                    Text("SSO").tag(TerminalLoginMethod.sso)
-                }.labelsHidden().pickerStyle(.menu)
-                if let executable = store.cliExecutable, let server {
-                    let command = TerminalLoginCommand.make(executable: executable, dataDirectory: dataDirectory, server: server, method: terminalMethod)
-                    Text(command).font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    Button("复制登录命令") { store.copyLoginCommand(command) }
-                } else { Text("请先填写有效的服务器地址。").font(.caption).foregroundStyle(.secondary) }
+                TerminalLoginActions(method: $terminalMethod, canCopy: terminalCommand != nil) {
+                    if let command = terminalCommand { store.copyLoginCommand(command) }
+                }
                 Button("已完成，检查登录状态") { Task { await store.start() } }
                 Text("使用本应用的独立目录，不会复用终端默认的账号资料。")
                     .font(.caption).foregroundStyle(.secondary)
