@@ -10,6 +10,8 @@ struct VaultPopoverView: View {
     let configurationIssue: String?
     @Binding var lockPolicy: AutoLockPolicy
     @State private var showsLockSettings = false
+    @State private var accountLoginMode = AccountLoginMode.app
+    @State private var accountServerSelection = AccountServerSelection()
 
     init(store: VaultStore, dataDirectory: URL, configurationIssue: String?, lockPolicy: Binding<AutoLockPolicy> = .constant(.idle(minutes: 5))) {
         self.store = store
@@ -122,7 +124,7 @@ struct VaultPopoverView: View {
     @ViewBuilder
     private var setup: some View {
         if configurationIssue == nil && (store.requiresLogin || store.phase == .signingIn) {
-            AccountSetupView(store: store, dataDirectory: dataDirectory)
+            AccountSetupView(store: store, dataDirectory: dataDirectory, mode: $accountLoginMode, serverSelection: $accountServerSelection)
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "externaldrive").font(.largeTitle).foregroundStyle(.secondary)
