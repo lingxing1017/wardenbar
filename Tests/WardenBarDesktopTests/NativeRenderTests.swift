@@ -170,6 +170,12 @@ final class NativeRenderTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
         func fields() -> [NSTextField] { all(host).compactMap { $0 as? NSTextField } }
+        let modeControl = try XCTUnwrap(all(host).compactMap { $0 as? NSSegmentedControl }.first)
+        XCTAssertEqual(modeControl.bounds.width, 248, accuracy: 0.5)
+        XCTAssertEqual(modeControl.segmentDistribution, .fillEqually)
+        let bezel = try XCTUnwrap(modeControl.selectedSegmentBezelColor?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(bezel.redComponent, bezel.greenComponent, accuracy: 0.001)
+        XCTAssertEqual(bezel.greenComponent, bezel.blueComponent, accuracy: 0.001)
         let address = try XCTUnwrap(fields().first { ($0.placeholderString ?? $0.placeholderAttributedString?.string) == "https://vault.example.com" })
         address.stringValue = "https://vault.example.com"
         address.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: address))
@@ -179,7 +185,8 @@ final class NativeRenderTests: XCTestCase {
         email.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: email))
         password.stringValue = "synthetic-master"
         password.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: password))
-        preference.mode = .terminal
+        modeControl.selectedSegment = 1
+        _ = modeControl.sendAction(modeControl.action, to: modeControl.target)
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
         XCTAssertFalse(fields().contains { $0.placeholderString == "主密码" })
@@ -189,7 +196,8 @@ final class NativeRenderTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
         try capture(host, name: "login-mode-terminal-result")
-        preference.mode = .app
+        modeControl.selectedSegment = 0
+        _ = modeControl.sendAction(modeControl.action, to: modeControl.target)
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(fields().first { $0.placeholderString == "电子邮箱" }?.stringValue, "synthetic@example.invalid")
