@@ -1,6 +1,36 @@
+# Swift Package Manager and Xcode
 .build/
 .swiftpm/
-.superpowers/
-.DS_Store
+DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# Distribution output
+/dist/
+/*.zip
+/*.dmg
+/*.pkg
+
+# Local tools and editor state
+.superpowers/
+.local-rag/
+.idea/
+.vscode/
+
+# macOS metadata
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Local environment, CLI state and signing credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+/CLI/
+/data.json
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
