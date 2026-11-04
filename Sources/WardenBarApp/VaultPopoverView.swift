@@ -71,7 +71,7 @@ struct VaultPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "lock.shield.fill").foregroundStyle(.tint).accessibilityHidden(true)
+            Image(nsImage: PasswordCoverArtwork.header).accessibilityHidden(true)
             Text("WardenBar").font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
             Spacer()
