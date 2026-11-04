@@ -1,6 +1,26 @@
 import SwiftUI
 import WardenBarDesktop
 
+struct TerminalLoginExplanation: View {
+    let serverIsValid: Bool
+    private let explanation = "特殊认证可在终端完成，之后回来检查登录状态。"
+
+    var body: some View {
+        // Measure the longer explanation even when showing the shorter validation hint.
+        // This also preserves the height when the explanation wraps in a narrow window.
+        Text(explanation)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hidden()
+            .overlay(alignment: .topLeading) {
+                Text(serverIsValid ? explanation : "请先填写有效的服务器地址")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.callout).foregroundStyle(.secondary)
+    }
+}
+
 /// Keep terminal options compact; native help remains on the enabled wrapper
 /// so an unavailable copy button can still explain how to enable it.
 struct TerminalLoginActions: View {
