@@ -235,10 +235,10 @@ final class NativeRenderTests: XCTestCase {
 
     private func render(_ store: VaultStore, name: String, dark: Bool, width: Double = PopoverWidth.defaultValue, policy: AutoLockPolicy = .idle(minutes: 5)) async throws {
         let view = ResizableVaultPopover(store: store, dataDirectory: URL(fileURLWithPath: "/synthetic/CLI"), configurationIssue: nil, savedWidth: .constant(width), lockPolicy: .constant(policy))
-        try await renderView(view, name: name, dark: dark, width: width, height: 520)
+        try await renderView(view, name: name, dark: dark, width: width, height: 520, expectsActionsMenu: true)
     }
 
-    private func renderView<V: View>(_ view: V, name: String, dark: Bool, width: Double, height: Double) async throws {
+    private func renderView<V: View>(_ view: V, name: String, dark: Bool, width: Double, height: Double, expectsActionsMenu: Bool = false) async throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let host = NSHostingView(rootView: view.environment(\.colorScheme, dark ? .dark : .light))
@@ -248,6 +248,15 @@ final class NativeRenderTests: XCTestCase {
         XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 0.5)
         try await Task.sleep(nanoseconds: 100_000_000)
         host.layoutSubtreeIfNeeded()
+        if expectsActionsMenu {
+            func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+            let actions = try XCTUnwrap(all(host).compactMap { $0 as? NSPopUpButton }
+                .first { $0.menu?.items.contains(where: { $0.title == "打开密码库目录" }) == true })
+            let quit = try XCTUnwrap(actions.menu?.items.first { $0.title == "退出" })
+            XCTAssertEqual(quit.keyEquivalent, "q")
+            XCTAssertEqual(quit.keyEquivalentModifierMask, .command)
+            XCTAssertTrue(quit.isEnabled)
+        }
         try capture(host, name: name)
         window.orderOut(nil)
     }

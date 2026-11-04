@@ -96,14 +96,10 @@ struct VaultPopoverView: View {
                 Button { store.lock() } label: { Label("锁定密码库", systemImage: "lock") }
                     .labelStyle(.iconOnly).help("锁定密码库")
                     .disabled(![.unlocked, .unlocking, .signingIn, .lockFailed].contains(store.phase))
-                Menu {
-                    Button("自动锁定…") { showsLockSettings = true; store.userDidInteract() }
-                    Divider()
-                    Button("打开密码库目录") { NSWorkspace.shared.open(dataDirectory) }
-                    Divider()
-                    Button("退出 WardenBar") { NSApp.terminate(nil) }.keyboardShortcut("q", modifiers: .command)
-                } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("更多操作") }
-                .menuStyle(.borderlessButton).fixedSize()
+                VaultActionsMenu(
+                    onLockSettings: { showsLockSettings = true; store.userDidInteract() },
+                    onOpenDirectory: { NSWorkspace.shared.open(dataDirectory) }
+                ).frame(width: 32, height: 22)
             }.modifier(NativeToolbarSurface())
         }
         .buttonStyle(.borderless)
