@@ -95,6 +95,12 @@ final class NativeRenderTests: XCTestCase {
 
     func testFirstRunAndKnownChallengeFormsRenderWithSyntheticData() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        for canCopy in [false, true] {
+            let actions = TerminalLoginActions(method: .constant(.apiKey), canCopy: canCopy, onCopy: {})
+                .padding(16).frame(width: PopoverWidth.minimum, height: 72)
+                .background(Color(nsColor: .windowBackgroundColor))
+            try await renderView(actions, name: canCopy ? "terminal-copy-enabled" : "terminal-copy-disabled", dark: !canCopy, width: PopoverWidth.minimum, height: 72)
+        }
         for challenge: CLILoginChallenge in [.twoFactor, .newDevice, .clientSecret] {
             let board = NSPasteboard(name: .init("WardenBarOnboard-" + UUID().uuidString))
             defer { board.releaseGlobally() }
