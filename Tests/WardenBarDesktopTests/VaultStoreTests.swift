@@ -47,6 +47,7 @@ actor ControlledVault: VaultBackend {
     func rejectVersion(_ value: Bool) { failVersion = value }
     func status() -> CLIStatus { statusCalls += 1; return authenticated ? (state == .unlocked ? .unlocked : .locked) : .unauthenticated }
     func useUnauthenticatedProfile() { authenticated = false; state = .unauthenticated }
+    func useAuthenticatedProfile() { authenticated = true; state = .locked }
     func delayLogin() { pauseLogin = true; loginStarted = false }
     func resumeLogin() { loginWait?.resume(); loginWait = nil }
     func requireLoginCode(_ challenge: CLILoginChallenge = .twoFactor) { requestCode = true; requestedChallenge = challenge }
@@ -149,6 +150,40 @@ actor ControlledVault: VaultBackend {
 
 @MainActor
 final class VaultStoreTests: XCTestCase {
+    func testTerminalLoginCheckDoesNotRequireCopyAndReportsResult() async {
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await store.checkLogin()
+        XCTAssertEqual(store.phase, .setup)
+        XCTAssertEqual(store.loginCheckMessage, "尚未登录，请先在终端完成登录")
+        XCTAssertNil(board.string(forType: .string))
+        let attemptedLogin = await backend.loginStarted
+        XCTAssertFalse(attemptedLogin)
+        await backend.useAuthenticatedProfile()
+        await store.checkLogin()
+        XCTAssertEqual(store.phase, .locked)
+        XCTAssertNil(store.loginCheckMessage)
+    }
+
+    func testLateTerminalLoginCheckCannotPublishAfterLock() async throws {
+        let backend = ControlledVault()
+        await backend.useUnauthenticatedProfile()
+        let (store, board) = make(backend)
+        defer { board.releaseGlobally() }
+        await store.start()
+        await backend.pauseNextVersion()
+        let checking = Task { await store.checkLogin() }
+        try await waitFor { await backend.versionCalls == 2 }
+        await store.lock().value
+        await backend.resumeVersion()
+        await checking.value
+        XCTAssertNil(store.loginCheckMessage)
+        XCTAssertFalse(store.isWorking)
+    }
+
     func testStartupDoesNotRunConcurrentChecks() async throws {
         let backend = ControlledVault()
         await backend.pauseNextVersion()
