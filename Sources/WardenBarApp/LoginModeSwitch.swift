@@ -34,6 +34,7 @@ struct LoginModeSwitch: NSViewRepresentable {
         view.isEnabled = context.environment.isEnabled
     }
 
+    @MainActor
     final class Coordinator: NSObject {
         var selection: Binding<AccountLoginMode>
         init(selection: Binding<AccountLoginMode>) { self.selection = selection }
