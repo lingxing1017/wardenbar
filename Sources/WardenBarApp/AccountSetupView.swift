@@ -9,13 +9,6 @@ enum AccountLoginMode: String, CaseIterable {
 struct AccountServerSelection {
     enum Choice: String, CaseIterable {
         case us = "Bitwarden 美国", eu = "Bitwarden 欧洲", custom = "自托管"
-        var compactTitle: String {
-            switch self {
-            case .us: return "美国"
-            case .eu: return "欧洲"
-            case .custom: return "自托管"
-            }
-        }
     }
     var choice = Choice.us
     var customAddress = ""
@@ -124,16 +117,28 @@ struct AccountSetupView: View {
     private var serverFields: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("服务器").font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Picker("服务器区域", selection: $serverSelection.choice) {
-                    ForEach(AccountServerSelection.Choice.allCases, id: \.self) { Text($0.compactTitle).tag($0) }
-                }.labelsHidden().pickerStyle(.menu).frame(width: 82)
-                TextField("https://vault.example.com", text: serverAddress)
-                    .textFieldStyle(.roundedBorder).focused($focus, equals: .server)
+            HStack(spacing: 0) {
+                TextField("", text: serverAddress, prompt: Text(verbatim: "https://vault.example.com"))
+                    .textFieldStyle(.plain).focused($focus, equals: .server)
                     .accessibilityLabel(serverSelection.choice == .custom ? "自托管服务器地址" : "服务器地址，只读")
                     .disabled(serverSelection.choice != .custom)
                     .frame(maxWidth: .infinity)
+                    .padding(.leading, 8)
+                Menu {
+                    Picker("服务器", selection: $serverSelection.choice) {
+                        ForEach(AccountServerSelection.Choice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }.labelsHidden().pickerStyle(.inline)
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .frame(width: 26)
+                    .accessibilityLabel("选择服务器")
+                    .help("选择 Bitwarden 区域或自托管服务器")
             }
+            .frame(height: 26)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1).allowsHitTesting(false) }
             if serverSelection.choice == .custom && !serverSelection.customAddress.isEmpty && server == nil {
                 Text("请输入 HTTPS 地址，不包含账号、查询参数或片段。")
                     .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
