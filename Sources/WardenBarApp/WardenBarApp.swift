@@ -81,7 +81,7 @@ struct WardenBarApplication: App {
                 lockPolicy: $lockPreferences.policy
             )
         } label: {
-            Image(systemName: store.phase == .lockFailed ? "exclamationmark.shield" : (store.phase == .unlocked ? "lock.open" : "lock.shield"))
+            Image(nsImage: PasswordCoverArtwork.menuBar(PasswordCoverState(phase: store.phase)))
                 .accessibilityLabel("WardenBar")
         }
         .menuBarExtraStyle(.window)

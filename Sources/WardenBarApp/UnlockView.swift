@@ -10,10 +10,15 @@ struct UnlockView: View {
     var body: some View {
         VStack(spacing: 16) {
             Spacer(minLength: 12)
-            Image(systemName: "lock.shield")
-                .font(.system(size: 42, weight: .light))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+            Group {
+                if let image = PasswordCoverArtwork.lockedHero {
+                    Image(nsImage: image).resizable().scaledToFit()
+                } else {
+                    Image(nsImage: PasswordCoverArtwork.header).resizable().scaledToFit()
+                }
+            }
+            .frame(width: 112, height: 42)
+            .accessibilityHidden(true)
             VStack(spacing: 8) {
                 Text("密码库已锁定").font(.title2.weight(.semibold))
                 Text("输入主密码，访问你的密码库。")
