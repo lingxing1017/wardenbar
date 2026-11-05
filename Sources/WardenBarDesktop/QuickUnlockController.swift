@@ -165,9 +165,13 @@ public final class QuickUnlockController: ObservableObject {
     }
 
     public func revokeAuthorization() {
-        revision &+= 1
+        cancelPendingAuthentication()
         authorization = nil
         authorizationSalt = Data()
+    }
+
+    public func cancelPendingAuthentication() {
+        revision &+= 1
         credentials.cancel()
     }
 
