@@ -38,6 +38,24 @@ private struct LoginModeHarness: View {
 
 @MainActor
 final class NativeRenderTests: XCTestCase {
+    func testSettingsHintUsesExistingHeaderSpaceWithoutLayoutChanges() async throws {
+        let baseline = NSHostingView(rootView: HStack(spacing: 8) {
+            Button {} label: { Image(systemName: "chevron.left") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+            Text("设置").font(.title2.weight(.semibold))
+        }.padding(.bottom, 24).frame(width: 280, alignment: .leading))
+        baseline.layoutSubtreeIfNeeded()
+        for locked in [false, true] {
+            let heading = SettingsHeading(isLocked: locked, onClose: {})
+                .frame(width: 280, alignment: .leading)
+            let host = NSHostingView(rootView: heading)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(host.fittingSize.height, baseline.fittingSize.height, accuracy: 0.5)
+            XCTAssertEqual(host.fittingSize.width, baseline.fittingSize.width, accuracy: 0.5)
+            try await renderView(heading, name: locked ? "settings-heading-locked" : "settings-heading-unlocked", dark: true, width: 280, height: baseline.fittingSize.height)
+        }
+    }
+
     func testLiveWidthChangesResizeThePanelInsteadOfClippingItsContent() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let board = NSPasteboard(name: .init("WardenBarLiveWidth-" + UUID().uuidString))

@@ -15,11 +15,7 @@ struct SettingsView: View {
         ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8) {
-                        Button(action: onClose) { Image(systemName: "chevron.left") }
-                            .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("返回密码库")
-                        Text("设置").font(.title2.weight(.semibold))
-                    }.padding(.bottom, 24)
+                    SettingsHeading(isLocked: store.phase != .unlocked, onClose: onClose)
                     if let quick = store.quickUnlock {
                         QuickUnlockSettingsSection(store: store, quick: quick)
                     } else {
@@ -111,6 +107,31 @@ struct SettingsView: View {
 }
 
 @MainActor
+struct SettingsHeading: View {
+    let isLocked: Bool
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onClose) { Image(systemName: "chevron.left") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("返回密码库")
+            Text("设置").font(.title2.weight(.semibold))
+        }
+        .padding(.bottom, 24)
+        .overlay(alignment: .bottomLeading) {
+            // Reuse the existing gap; the hint never contributes layout height.
+            Text("解锁密码库后方可修改")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.bottom, 4)
+                .opacity(isLocked ? 1 : 0)
+                .accessibilityHidden(!isLocked)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+@MainActor
 private struct QuickUnlockSettingsSection: View {
     @ObservedObject var store: VaultStore
     @ObservedObject var quick: QuickUnlockController
@@ -163,9 +184,6 @@ private struct QuickUnlockSettingsSection: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
             if !quick.touchIDAvailable {
                 Text("此 Mac 未配置可用的 Touch ID").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
-            }
-            if store.phase != .unlocked {
-                Text("解锁密码库后可修改设置").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.top, 8) }
         }
