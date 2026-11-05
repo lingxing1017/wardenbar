@@ -134,6 +134,8 @@ final class NativeRenderTests: XCTestCase {
         let board = NSPasteboard(name: .init("SettingsValidation-" + UUID().uuidString))
         defer { board.releaseGlobally() }
         let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board))
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
         let preferences = AutoLockPreferences(defaults: UserDefaults(suiteName: "SettingsValidation-" + UUID().uuidString)!)
         preferences.policy = .idle(minutes: 17)
         let view = SettingsView(store: store, policy: Binding(get: { preferences.policy }, set: { preferences.policy = $0 }), focusAutoLock: false, onClose: {})
@@ -165,6 +167,18 @@ final class NativeRenderTests: XCTestCase {
             XCTAssertEqual(preferences.policy, .idle(minutes: 17))
             XCTAssertTrue(accessibilityStrings(host).contains("17 分钟"), "Displayed policy must match the effective 17-minute policy")
         }
+        field.stringValue = "19"
+        field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(preferences.policy, .idle(minutes: 19))
+        await store.lock().value
+        try await Task.sleep(nanoseconds: 50_000_000)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertFalse(field.isEnabled, "Settings remain visible but become read-only when locked")
+        field.stringValue = "30"
+        field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(preferences.policy, .idle(minutes: 19), "A late edit after locking must not persist")
     }
 
     func testFirstRunAndKnownChallengeFormsRenderWithSyntheticData() async throws {

@@ -27,7 +27,7 @@ struct SettingsView: View {
                         Text("解锁密码库后可设置快捷解锁").font(.caption).foregroundStyle(.secondary).padding(.top, 12)
                     }
                     Divider().padding(.top, 20).padding(.bottom, 18)
-                    autoLock.id("autoLock")
+                    autoLock.disabled(!canEdit).id("autoLock")
                 }.padding(16)
             }
             .onAppear {
@@ -43,6 +43,7 @@ struct SettingsView: View {
 
     private var systemOnly: Binding<Bool> {
         Binding(get: { policy == .systemOnly }, set: { systemOnly in
+            guard canEdit else { return }
             policy = systemOnly ? .systemOnly : .idle(minutes: lastIdleMinutes)
             store.userDidInteract()
         })
@@ -60,6 +61,7 @@ struct SettingsView: View {
                 Menu {
                     ForEach([1, 5, 15, 30, 60], id: \.self) { minutes in
                         Button("\(minutes) 分钟") {
+                            guard canEdit else { return }
                             policy = .idle(minutes: minutes)
                             customMinutes = String(minutes)
                             lastIdleMinutes = minutes
@@ -67,7 +69,11 @@ struct SettingsView: View {
                             store.userDidInteract()
                         }
                     }
-                    Button("自定") { showsCustomMinutes = true; store.userDidInteract() }
+                    Button("自定") {
+                        guard canEdit else { return }
+                        showsCustomMinutes = true
+                        store.userDidInteract()
+                    }
                 } label: {
                     Text("\(effectiveIdleMinutes) 分钟")
                 }.menuStyle(.borderedButton).fixedSize().disabled(policy == .systemOnly)
@@ -77,6 +83,7 @@ struct SettingsView: View {
                     TextField("分钟", text: $customMinutes)
                         .textFieldStyle(.roundedBorder).frame(width: 64).accessibilityLabel("空闲分钟数")
                         .onChange(of: customMinutes) { value in
+                            guard canEdit else { return }
                             if let minutes = Int(value), (1...1440).contains(minutes) {
                                 policy = .idle(minutes: minutes)
                                 lastIdleMinutes = minutes
@@ -99,6 +106,8 @@ struct SettingsView: View {
         if case .idle(let minutes) = policy { return minutes }
         return lastIdleMinutes
     }
+
+    private var canEdit: Bool { store.phase == .unlocked && !store.isWorking }
 }
 
 @MainActor
@@ -120,6 +129,7 @@ private struct QuickUnlockSettingsSection: View {
                 }
                 Spacer(minLength: 8)
                 Toggle("Touch ID", isOn: Binding(get: { quick.touchIDEnabled }, set: { enabled in
+                    guard canConfigure else { return }
                     store.userDidInteract()
                     if enabled { setup = .touchID }
                     else { do { try quick.disableTouchID() } catch { self.error = error.localizedDescription } }
@@ -135,10 +145,18 @@ private struct QuickUnlockSettingsSection: View {
                 }
                 Spacer(minLength: 8)
                 if quick.pinConfigured {
-                    Button("关闭") { quick.disablePIN(); store.userDidInteract() }
+                    Button("关闭") {
+                        guard canConfigure else { return }
+                        quick.disablePIN()
+                        store.userDidInteract()
+                    }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).disabled(!canConfigure)
                 }
-                Button(quick.pinConfigured ? "更改" : "设置") { setup = .pin; store.userDidInteract() }
+                Button(quick.pinConfigured ? "更改" : "设置") {
+                    guard canConfigure else { return }
+                    setup = .pin
+                    store.userDidInteract()
+                }
                     .disabled(!canConfigure)
             }.frame(minHeight: 48)
             Text("重启 WardenBar，需先使用主密码解锁")
@@ -147,7 +165,7 @@ private struct QuickUnlockSettingsSection: View {
                 Text("此 Mac 未配置可用的 Touch ID").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
             }
             if store.phase != .unlocked {
-                Text("解锁密码库后可修改解锁方式").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                Text("解锁密码库后可修改设置").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.top, 8) }
         }
