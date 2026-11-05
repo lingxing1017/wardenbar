@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import CryptoKit
 
 public enum VaultReadPolicy: Sendable { case onDemand, sessionSnapshot }
 
@@ -62,6 +63,17 @@ public actor BitwardenVault {
             throw VaultError.invalidResponse
         }
         return reported
+    }
+
+    /// Bind local credentials to both the account and its server without exposing identifiers.
+    public func quickUnlockIdentity() async throws -> String? {
+        struct Identity: Decodable { let userId: String?; let serverUrl: String? }
+        let token = generation
+        let data = try await perform(["status"], authenticated: session != nil)
+        guard token == generation else { throw VaultError.sessionChanged }
+        let identity = try decode(Identity.self, from: data)
+        guard let id = identity.userId, !id.isEmpty, let server = identity.serverUrl, !server.isEmpty else { return nil }
+        return SHA256.hash(data: Data((server + "\0" + id).utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     public func login(server: VaultServer, masterPassword: String, method: CLITwoFactorMethod, dialogue: CLILoginDialogue) async throws {

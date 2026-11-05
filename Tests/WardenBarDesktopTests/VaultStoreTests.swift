@@ -46,6 +46,7 @@ actor ControlledVault: VaultBackend {
     }
     func rejectVersion(_ value: Bool) { failVersion = value }
     func status() -> CLIStatus { statusCalls += 1; return authenticated ? (state == .unlocked ? .unlocked : .locked) : .unauthenticated }
+    func quickUnlockIdentity() -> String? { authenticated ? "synthetic-account" : nil }
     func useUnauthenticatedProfile() { authenticated = false; state = .unauthenticated }
     func useAuthenticatedProfile() { authenticated = true; state = .locked }
     func delayLogin() { pauseLogin = true; loginStarted = false }

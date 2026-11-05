@@ -16,7 +16,8 @@ final class AppCoordinator {
         let parsed = try? RuntimeOptions.parse(Array(CommandLine.arguments.dropFirst()))
         options = parsed ?? RuntimeOptions()
         if let parsed, let configuration = try? CLIConfiguration.discover(executable: parsed.cli, dataDirectory: parsed.dataDirectory) {
-            store = VaultStore(backend: BitwardenVault(configuration: configuration, readPolicy: .sessionSnapshot), clipboard: ClipboardService(), cliExecutable: configuration.executable)
+            let quickUnlock = QuickUnlockController(credentials: KeychainBiometricCredentials(), profile: configuration.dataDirectory.path)
+            store = VaultStore(backend: BitwardenVault(configuration: configuration, readPolicy: .sessionSnapshot), clipboard: ClipboardService(), cliExecutable: configuration.executable, quickUnlock: quickUnlock)
             configurationIssue = nil
         } else {
             store = VaultStore(backend: nil, clipboard: ClipboardService())

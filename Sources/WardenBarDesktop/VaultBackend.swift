@@ -5,6 +5,7 @@ public protocol VaultBackend: Sendable {
     func version() async throws -> String
     func login(server: VaultServer, masterPassword: String, method: CLITwoFactorMethod, dialogue: CLILoginDialogue) async throws
     func status() async throws -> CLIStatus
+    func quickUnlockIdentity() async throws -> String?
     func unlock(masterPassword: String) async throws
     func items() async throws -> [VaultItemSummary]
     func folders() async throws -> [VaultFolder]
@@ -17,3 +18,7 @@ public protocol VaultBackend: Sendable {
 }
 
 extension BitwardenVault: VaultBackend {}
+
+extension VaultBackend {
+    public func quickUnlockIdentity() async throws -> String? { nil }
+}

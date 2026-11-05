@@ -12,6 +12,7 @@ public final class VaultStore: ObservableObject {
     @Published public private(set) var loginChallenge: CLILoginChallenge?
     @Published public private(set) var loginCheckMessage: String?
     public let cliExecutable: URL?
+    public let quickUnlock: QuickUnlockController?
     @Published public private(set) var items: [VaultItemSummary] = []
     @Published public private(set) var folders: [VaultFolder] = []
     @Published public var folderFilter: FolderFilter = .all { didSet { userDidInteract() } }
@@ -35,10 +36,11 @@ public final class VaultStore: ObservableObject {
     private var noticeTimer: Task<Void, Never>?
     private var loginDialogue: CLILoginDialogue?
 
-    public init(backend: (any VaultBackend)?, clipboard: ClipboardService, cliExecutable: URL? = nil, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    public init(backend: (any VaultBackend)?, clipboard: ClipboardService, cliExecutable: URL? = nil, quickUnlock: QuickUnlockController? = nil, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.backend = backend
         self.clipboard = clipboard
         self.cliExecutable = cliExecutable
+        self.quickUnlock = quickUnlock
         self.clock = clock
         lastActivity = clock()
     }
@@ -88,6 +90,11 @@ public final class VaultStore: ObservableObject {
         do {
             let status = try await backend.status()
             guard generation == token else { return }
+            if let quickUnlock {
+                let identity = status == .unauthenticated ? nil : try await backend.quickUnlockIdentity()
+                guard generation == token else { return }
+                quickUnlock.bind(account: identity)
+            }
             requiresLogin = status == .unauthenticated
             phase = status == .unauthenticated ? .setup : .locked
             errorMessage = nil
@@ -141,6 +148,12 @@ public final class VaultStore: ObservableObject {
             loginChallenge = nil
             requiresLogin = false
             phase = .unlocked
+            if let quickUnlock {
+                let identity = try await backend.quickUnlockIdentity()
+                guard generation == token, phase == .unlocked else { return }
+                quickUnlock.bind(account: identity)
+                quickUnlock.recordUnlocked(password: masterPassword, manual: true)
+            }
             activityMessage = "正在读取记录…"
             let loaded = try await backend.items()
             guard generation == token, phase == .unlocked else { return }
@@ -193,8 +206,28 @@ public final class VaultStore: ObservableObject {
     }
 
     public func unlock(masterPassword: String, expectedGeneration: UInt64? = nil) async {
+        guard !masterPassword.isEmpty else { return }
+        await unlock(manual: true, expectedGeneration: expectedGeneration) { masterPassword }
+    }
+
+    public func unlockWithPIN(_ pin: String, expectedGeneration: UInt64? = nil) async {
+        await unlock(manual: false, expectedGeneration: expectedGeneration) { [quickUnlock] in
+            guard let quickUnlock else { throw QuickUnlockError.notConfigured }
+            return try quickUnlock.passwordForPIN(pin)
+        }
+    }
+
+    public func unlockWithTouchID(expectedGeneration: UInt64? = nil) async {
+        await unlock(manual: false, expectedGeneration: expectedGeneration) { [quickUnlock] in
+            guard let quickUnlock else { throw QuickUnlockError.notConfigured }
+            return try await quickUnlock.passwordForTouchID()
+        }
+    }
+
+    private func unlock(manual: Bool, expectedGeneration: UInt64?, password: () async throws -> String) async {
         if let expectedGeneration, expectedGeneration != generation { return }
-        guard phase == .locked, !isWorking, !masterPassword.isEmpty, let backend else { return }
+        guard phase == .locked, !isWorking, let backend else { return }
+        quickUnlock?.revokeAuthorization()
         generation &+= 1
         let token = generation
         phase = .unlocking
@@ -206,8 +239,16 @@ public final class VaultStore: ObservableObject {
         var releasedWork = false
         defer { if generation == token, !releasedWork { isWorking = false; activityMessage = nil } }
         do {
+            if let quickUnlock {
+                let identity = try await backend.quickUnlockIdentity()
+                guard generation == token, phase == .unlocking else { return }
+                quickUnlock.bind(account: identity)
+            }
+            let masterPassword = try await password()
+            guard generation == token, phase == .unlocking else { return }
             try await backend.unlock(masterPassword: masterPassword)
             guard generation == token, phase == .unlocking else { return }
+            quickUnlock?.recordUnlocked(password: masterPassword, manual: manual)
             phase = .unlocked
             activityMessage = "正在读取记录…"
             let loaded = try await backend.items()
@@ -228,7 +269,7 @@ public final class VaultStore: ObservableObject {
                 let backendState = await backend.state
                 guard generation == token else { return }
                 phase = backendState == .lockFailed ? .lockFailed : .locked
-                errorMessage = phase == .lockFailed ? Self.lockFailure : "解锁失败，请检查主密码与登录状态。"
+                errorMessage = phase == .lockFailed ? Self.lockFailure : ((error as? QuickUnlockError)?.errorDescription ?? "解锁失败，请检查主密码与登录状态。")
             }
         }
     }
@@ -379,6 +420,7 @@ public final class VaultStore: ObservableObject {
     /// Invalidates visible and pending secrets synchronously, before backend cleanup can suspend.
     @discardableResult
     public func lock() -> Task<Void, Never> {
+        quickUnlock?.revokeAuthorization()
         if let locking { return locking }
         let wasSigningIn = phase == .signingIn
         let needsBackend = phase == .unlocked || phase == .unlocking || phase == .lockFailed || wasSigningIn
