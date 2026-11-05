@@ -10,6 +10,7 @@ struct VaultPopoverView: View {
     let configurationIssue: String?
     @Binding var lockPolicy: AutoLockPolicy
     @State private var showsLockSettings = false
+    @State private var focusesAutoLock = false
     @State private var accountLoginMode = AccountLoginMode.app
     @State private var accountServerSelection = AccountServerSelection()
 
@@ -27,7 +28,7 @@ struct VaultPopoverView: View {
             if let error = configurationIssue ?? store.errorMessage { errorBanner(error) }
             Group {
                 if showsLockSettings {
-                    AutoLockSettingsView(policy: $lockPolicy, onClose: { showsLockSettings = false; store.userDidInteract() }, onInteract: { store.userDidInteract() })
+                    SettingsView(store: store, policy: $lockPolicy, focusAutoLock: focusesAutoLock, onClose: { showsLockSettings = false; store.userDidInteract() })
                 } else {
                     switch store.phase {
                     case .checking: progress("正在检查密码库…")
@@ -97,7 +98,7 @@ struct VaultPopoverView: View {
                     .labelStyle(.iconOnly).help("锁定密码库")
                     .disabled(![.unlocked, .unlocking, .signingIn, .lockFailed].contains(store.phase))
                 VaultActionsMenu(
-                    onLockSettings: { showsLockSettings = true; store.userDidInteract() },
+                    onLockSettings: { focusesAutoLock = false; showsLockSettings = true; store.userDidInteract() },
                     onOpenDirectory: { NSWorkspace.shared.open(dataDirectory) }
                 ).frame(width: 32, height: 22)
             }.modifier(NativeToolbarSurface())
@@ -147,7 +148,7 @@ struct VaultPopoverView: View {
             } else { Text(store.phase == .lockFailed ? "后端锁定待重试" : "密码库访问受保护") }
             HStack(spacing: 4) {
                 if store.phase == .unlocked {
-                    Button { showsLockSettings = true; store.userDidInteract() } label: {
+                    Button { focusesAutoLock = true; showsLockSettings = true; store.userDidInteract() } label: {
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             if let seconds = store.secondsUntilLock(policy: lockPolicy) {
                                 Text(String(format: "锁定 %02d:%02d", seconds / 60, seconds % 60)).monospacedDigit()

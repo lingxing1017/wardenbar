@@ -85,7 +85,7 @@ final class NativeRenderTests: XCTestCase {
         try await render(store, name: "list-narrow", dark: false, width: PopoverWidth.minimum)
         try await render(store, name: "list-wide", dark: false, width: PopoverWidth.maximum)
         try await render(store, name: "system-only", dark: true, width: PopoverWidth.minimum, policy: .systemOnly)
-        let settings = AutoLockSettingsView(policy: .constant(.idle(minutes: 17)), onClose: {}, onInteract: {})
+        let settings = SettingsView(store: store, policy: .constant(.idle(minutes: 17)), focusAutoLock: false, onClose: {})
             .frame(width: 280, height: 420)
             .background(Color(nsColor: .windowBackgroundColor))
         try await renderView(settings, name: "lock-settings", dark: false, width: 280, height: 420)
@@ -108,6 +108,63 @@ final class NativeRenderTests: XCTestCase {
             try await render(store, name: "detail-" + id, dark: id == "ssh" || id == "card", width: PopoverWidth.minimum)
         }
         await store.lock().value
+    }
+
+    func testQuickUnlockSettingsRenderAtNarrowWidths() async throws {
+        let board = NSPasteboard(name: .init("WardenBarQuickRender-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        let quick = QuickUnlockController(defaults: UserDefaults(suiteName: "QuickRender-" + UUID().uuidString)!, credentials: MemoryBiometricCredentials(), profile: "synthetic")
+        let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board), quickUnlock: quick)
+        await store.start()
+        await store.unlock(masterPassword: "synthetic-master")
+        try quick.configurePIN("123456", password: "synthetic-master")
+        try await quick.enableTouchID(password: "synthetic-master")
+        for width in [280.0, 312.0] {
+            let view = SettingsView(store: store, policy: .constant(.systemOnly), focusAutoLock: false, onClose: {})
+                .frame(width: width, height: 424).background(Color(nsColor: .windowBackgroundColor))
+            try await renderView(view, name: "settings-\(Int(width))", dark: true, width: width, height: 424)
+        }
+        let setup = QuickUnlockSetupView(store: store, quick: quick, kind: .pin, onClose: {})
+        try await renderView(setup, name: "pin-setup", dark: false, width: 300, height: 340)
+        await store.lock().value
+        try await render(store, name: "quick-unlock", dark: true, width: 312)
+    }
+
+    func testInvalidCustomMinutesKeepTheDisplayedEffectivePolicy() async throws {
+        let board = NSPasteboard(name: .init("SettingsValidation-" + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        let store = VaultStore(backend: ControlledVault(), clipboard: ClipboardService(pasteboard: board))
+        let preferences = AutoLockPreferences(defaults: UserDefaults(suiteName: "SettingsValidation-" + UUID().uuidString)!)
+        preferences.policy = .idle(minutes: 17)
+        let view = SettingsView(store: store, policy: Binding(get: { preferences.policy }, set: { preferences.policy = $0 }), focusAutoLock: false, onClose: {})
+        let host = NSHostingView(rootView: view.frame(width: 312, height: 424))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 312, height: 424), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.orderOut(nil) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.layoutSubtreeIfNeeded()
+        func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+        let field = try XCTUnwrap(all(host).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "分钟" })
+        func accessibilityStrings(_ node: NSObject, depth: Int = 0) -> [String] {
+            guard depth < 20 else { return [] }
+            var values: [String] = []
+            for key in ["accessibilityLabel", "accessibilityValue"] where node.responds(to: NSSelectorFromString(key)) {
+                if let value = node.value(forKey: key) as? String { values.append(value) }
+            }
+            if node.responds(to: NSSelectorFromString("accessibilityChildren")),
+               let children = node.value(forKey: "accessibilityChildren") as? [NSObject] {
+                values += children.flatMap { accessibilityStrings($0, depth: depth + 1) }
+            }
+            return values
+        }
+        for invalid in ["0", "", "1441"] {
+            field.stringValue = invalid
+            field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+            try await Task.sleep(nanoseconds: 50_000_000)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(preferences.policy, .idle(minutes: 17))
+            XCTAssertTrue(accessibilityStrings(host).contains("17 分钟"), "Displayed policy must match the effective 17-minute policy")
+        }
     }
 
     func testFirstRunAndKnownChallengeFormsRenderWithSyntheticData() async throws {
@@ -253,6 +310,8 @@ final class NativeRenderTests: XCTestCase {
             let actions = try XCTUnwrap(all(host).compactMap { $0 as? NSPopUpButton }
                 .first { $0.menu?.items.contains(where: { $0.title == "打开密码库目录" }) == true })
             let quit = try XCTUnwrap(actions.menu?.items.first { $0.title == "退出" })
+            let settings = try XCTUnwrap(actions.menu?.items.first { $0.title == "设置" })
+            XCTAssertNil(settings.submenu)
             XCTAssertEqual(quit.keyEquivalent, "q")
             XCTAssertEqual(quit.keyEquivalentModifierMask, .command)
             XCTAssertTrue(quit.isEnabled)

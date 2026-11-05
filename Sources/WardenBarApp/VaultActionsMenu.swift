@@ -18,7 +18,7 @@ struct VaultActionsMenu: NSViewRepresentable {
         let title = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         title.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: nil)
         menu.addItem(title)
-        menu.addItem(item("自动锁定…", action: #selector(Coordinator.lockSettings), coordinator: context.coordinator))
+        menu.addItem(item("设置", action: #selector(Coordinator.lockSettings), coordinator: context.coordinator))
         menu.addItem(.separator())
         menu.addItem(item("打开密码库目录", action: #selector(Coordinator.openDirectory), coordinator: context.coordinator))
         menu.addItem(.separator())
