@@ -38,6 +38,22 @@ private struct LoginModeHarness: View {
 
 @MainActor
 final class NativeRenderTests: XCTestCase {
+    func testQuickUnlockRowsHaveEqualGeometryForToggleAndButtons() {
+        let touch = NSHostingView(rootView: QuickUnlockSettingRow(title: "Touch ID", hint: "重启 WardenBar，仍可使用") {
+            Toggle("Touch ID", isOn: .constant(true)).labelsHidden().toggleStyle(.switch).controlSize(.small)
+        }.frame(width: 248))
+        let pin = NSHostingView(rootView: QuickUnlockSettingRow(title: "PIN 码", hint: "重启 WardenBar，需先使用主密码解锁") {
+            HStack {
+                Button("关闭") {}.buttonStyle(.bordered)
+                Button("更改") {}.buttonStyle(.bordered)
+            }
+        }.frame(width: 248))
+        touch.layoutSubtreeIfNeeded()
+        pin.layoutSubtreeIfNeeded()
+        XCTAssertEqual(touch.fittingSize.height, pin.fittingSize.height, accuracy: 0.5)
+        XCTAssertEqual(touch.fittingSize.width, pin.fittingSize.width, accuracy: 0.5)
+    }
+
     func testSettingsHintUsesExistingHeaderSpaceWithoutLayoutChanges() async throws {
         let baseline = NSHostingView(rootView: HStack(spacing: 8) {
             Button {} label: { Image(systemName: "chevron.left") }

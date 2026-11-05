@@ -21,9 +21,9 @@ struct SettingsView: View {
                     } else {
                         Text("解锁方式").font(.headline).foregroundStyle(.primary)
                         Text("解锁密码库后可设置快捷解锁").font(.caption).foregroundStyle(.secondary).padding(.top, 12)
+                        Divider().padding(.top, 20)
                     }
-                    Divider().padding(.top, 20).padding(.bottom, 18)
-                    autoLock.disabled(!canEdit).id("autoLock")
+                    autoLock.disabled(!canEdit).padding(.top, 18).id("autoLock")
                 }.padding(16)
             }
             .onAppear {
@@ -132,6 +132,25 @@ struct SettingsHeading: View {
 }
 
 @MainActor
+struct QuickUnlockSettingRow<Controls: View>: View {
+    let title: String
+    let hint: String
+    @ViewBuilder let controls: () -> Controls
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer(minLength: 8)
+                controls()
+            }.frame(height: 24)
+            Text(hint).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(.vertical, 8)
+    }
+}
+
+@MainActor
 private struct QuickUnlockSettingsSection: View {
     @ObservedObject var store: VaultStore
     @ObservedObject var quick: QuickUnlockController
@@ -143,12 +162,7 @@ private struct QuickUnlockSettingsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("解锁方式").font(.headline).foregroundStyle(.primary).padding(.bottom, 8)
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Touch ID")
-                    Text("重启 WardenBar，仍可使用").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
+            QuickUnlockSettingRow(title: "Touch ID", hint: "重启 WardenBar，仍可使用") {
                 Toggle("Touch ID", isOn: Binding(get: { quick.touchIDEnabled }, set: { enabled in
                     guard canConfigure else { return }
                     store.userDidInteract()
@@ -157,14 +171,9 @@ private struct QuickUnlockSettingsSection: View {
                 }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.small)
                     .disabled(!canConfigure || (!quick.touchIDEnabled && !quick.touchIDAvailable))
-            }.frame(minHeight: 48)
+            }
             Divider()
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PIN 码")
-                    Text(quick.pinConfigured ? "已设置" : "未设置").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
+            QuickUnlockSettingRow(title: "PIN 码", hint: "重启 WardenBar，需先使用主密码解锁") {
                 if quick.pinConfigured {
                     Button("关闭") {
                         guard canConfigure else { return }
@@ -179,13 +188,12 @@ private struct QuickUnlockSettingsSection: View {
                     store.userDidInteract()
                 }
                     .buttonStyle(.bordered).disabled(!canConfigure)
-            }.frame(minHeight: 48)
-            Text("重启 WardenBar，需先使用主密码解锁")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
-            if !quick.touchIDAvailable {
-                Text("此 Mac 未配置可用的 Touch ID").font(.caption).foregroundStyle(.secondary).padding(.top, 8)
             }
-            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.top, 8) }
+            if !quick.touchIDAvailable {
+                Text("此 Mac 未配置可用的 Touch ID").font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.bottom, 8) }
+            Divider()
         }
         .sheet(item: $setup) { kind in
             QuickUnlockSetupView(store: store, quick: quick, kind: kind, onClose: { setup = nil })
