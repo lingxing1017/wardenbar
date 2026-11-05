@@ -145,6 +145,9 @@ final class NativeRenderTests: XCTestCase {
         let setup = QuickUnlockSetupView(store: store, quick: quick, kind: .pin, onClose: {})
         try await renderView(setup, name: "pin-setup", dark: false, width: 300, height: 340)
         await store.lock().value
+        let lockedSettings = SettingsView(store: store, policy: .constant(.systemOnly), focusAutoLock: false, onClose: {})
+            .frame(width: 312, height: 424).background(Color(nsColor: .windowBackgroundColor))
+        try await renderView(lockedSettings, name: "settings-locked-312", dark: true, width: 312, height: 424)
         try await render(store, name: "quick-unlock", dark: true, width: 312)
     }
 

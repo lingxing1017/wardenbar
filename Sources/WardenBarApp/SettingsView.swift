@@ -171,14 +171,14 @@ private struct QuickUnlockSettingsSection: View {
                         quick.disablePIN()
                         store.userDidInteract()
                     }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary).disabled(!canConfigure)
+                        .buttonStyle(.bordered).disabled(!canConfigure)
                 }
                 Button(quick.pinConfigured ? "更改" : "设置") {
                     guard canConfigure else { return }
                     setup = .pin
                     store.userDidInteract()
                 }
-                    .disabled(!canConfigure)
+                    .buttonStyle(.bordered).disabled(!canConfigure)
             }.frame(minHeight: 48)
             Text("重启 WardenBar，需先使用主密码解锁")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
