@@ -78,9 +78,9 @@ public final class QuickUnlockController: ObservableObject {
 
     /// Call only after a successful backend unlock, never on an authentication UI result.
     public func recordUnlocked(password: String, manual: Bool) {
-        guard account != nil else { return }
+        guard account != nil, !password.isEmpty else { return }
         authorizationSalt = Self.randomData()
-        authorization = Self.digest(authorizationSalt + Data(password.utf8))
+        authorization = try? Self.derive(password, salt: authorizationSalt).withUnsafeBytes { Data($0) }
         guard manual, let record = record() else { return }
         do {
             let key = try Self.derive(password, salt: record.masterSalt)
@@ -184,7 +184,8 @@ public final class QuickUnlockController: ObservableObject {
     }
     private func requireAuthorization(_ password: String) throws {
         guard account != nil, let authorization else { throw QuickUnlockError.changed }
-        let candidate = Self.digest(authorizationSalt + Data(password.utf8))
+        guard !password.isEmpty else { throw QuickUnlockError.invalidPassword }
+        let candidate = try Self.derive(password, salt: authorizationSalt).withUnsafeBytes { Data($0) }
         guard zip(candidate, authorization).reduce(UInt8(0), { $0 | ($1.0 ^ $1.1) }) == 0 else { throw QuickUnlockError.invalidPassword }
     }
     private func armPIN(password: String, pinKey: Data) throws {
@@ -208,7 +209,7 @@ public final class QuickUnlockController: ObservableObject {
                 bytes.withUnsafeBytes { input in
                     CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), input.baseAddress!.assumingMemoryBound(to: Int8.self), bytes.count,
                                         saltBytes.baseAddress!.assumingMemoryBound(to: UInt8.self), salt.count,
-                                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), 210_000,
+                                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), 600_000,
                                         target.baseAddress!.assumingMemoryBound(to: UInt8.self), 32)
                 }
             }

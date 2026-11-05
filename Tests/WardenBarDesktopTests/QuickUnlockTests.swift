@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import WardenBarDesktop
 
 @MainActor
@@ -8,7 +9,12 @@ final class MemoryBiometricCredentials: BiometricCredentials {
     var rejected = false
     var readWait: CheckedContinuation<Void, Never>?
     var pauseRead = false
-    func save(_ password: Data, account: String) async throws { records[account] = password }
+    var saveWait: CheckedContinuation<Void, Never>?
+    var pauseSave = false
+    func save(_ password: Data, account: String) async throws {
+        if pauseSave { await withCheckedContinuation { saveWait = $0 } }
+        records[account] = password
+    }
     func read(account: String) async throws -> Data {
         if pauseRead { await withCheckedContinuation { readWait = $0 } }
         if rejected { throw QuickUnlockError.biometricUnavailable }
@@ -120,6 +126,34 @@ final class QuickUnlockTests: XCTestCase {
         credentials.readWait?.resume()
         do { _ = try await pending.value; XCTFail("A stale approval must not return a password") }
         catch {}
+    }
+
+    func testCancelledBiometricEnrollmentRemovesLateWrittenCredential() async throws {
+        let credentials = MemoryBiometricCredentials()
+        let controller = QuickUnlockController(defaults: makeDefaults(), credentials: credentials, profile: "test")
+        controller.bind(account: "a")
+        controller.recordUnlocked(password: "synthetic-master", manual: true)
+        credentials.pauseSave = true
+        let enrollment = Task { try await controller.enableTouchID(password: "synthetic-master") }
+        while credentials.saveWait == nil { await Task.yield() }
+        controller.revokeAuthorization()
+        credentials.saveWait?.resume()
+        do { try await enrollment.value; XCTFail("A cancelled enrollment must not enable Touch ID") }
+        catch {}
+        XCTAssertFalse(controller.touchIDEnabled)
+        XCTAssertTrue(credentials.records.isEmpty)
+    }
+
+    func testSetupDoesNotRetainAFastMasterPasswordVerifier() throws {
+        let controller = QuickUnlockController(defaults: makeDefaults(), credentials: MemoryBiometricCredentials(), profile: "test")
+        controller.bind(account: "a")
+        controller.recordUnlocked(password: "synthetic-master", manual: true)
+        let fields = Dictionary(uniqueKeysWithValues: Mirror(reflecting: controller).children.compactMap { child in
+            child.label.map { ($0, child.value) }
+        })
+        let salt = try XCTUnwrap(fields["authorizationSalt"] as? Data)
+        let verifier = try XCTUnwrap(fields["authorization"] as? Data)
+        XCTAssertNotEqual(verifier, Data(SHA256.hash(data: salt + Data("synthetic-master".utf8))))
     }
 
     func testSuccessfulPINResetsConsecutiveFailureCount() throws {
