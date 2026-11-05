@@ -19,7 +19,7 @@ struct SettingsView: View {
                     if let quick = store.quickUnlock {
                         QuickUnlockSettingsSection(store: store, quick: quick)
                     } else {
-                        Text("解锁方式").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("解锁方式").font(.headline).foregroundStyle(.primary)
                         Text("解锁密码库后可设置快捷解锁").font(.caption).foregroundStyle(.secondary).padding(.top, 12)
                     }
                     Divider().padding(.top, 20).padding(.bottom, 18)
@@ -47,7 +47,7 @@ struct SettingsView: View {
 
     private var autoLock: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("自动锁定").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("自动锁定").font(.headline).foregroundStyle(.primary)
             HStack(alignment: .top) {
                 Picker("锁定方式", selection: systemOnly) {
                     Text("空闲后锁定").tag(false)
@@ -142,7 +142,7 @@ private struct QuickUnlockSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("解锁方式").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
+            Text("解锁方式").font(.headline).foregroundStyle(.primary).padding(.bottom, 8)
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Touch ID")
