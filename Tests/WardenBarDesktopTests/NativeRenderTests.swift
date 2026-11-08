@@ -196,18 +196,27 @@ final class NativeRenderTests: XCTestCase {
             }
             return values
         }
+        func displayedPolicyTitles() -> [String] {
+            // SwiftUI menus use a native popup on macOS 26, while newer
+            // runtimes can expose the label as a separate accessibility node.
+            let nativeTitles = all(host).compactMap { ($0 as? NSPopUpButton)?.title }
+            return nativeTitles + accessibilityStrings(host)
+        }
         for invalid in ["0", "", "1441"] {
             field.stringValue = invalid
             field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
             try await Task.sleep(nanoseconds: 50_000_000)
             host.layoutSubtreeIfNeeded()
             XCTAssertEqual(preferences.policy, .idle(minutes: 17))
-            XCTAssertTrue(accessibilityStrings(host).contains("17 分钟"), "Displayed policy must match the effective 17-minute policy")
+            let titles = displayedPolicyTitles()
+            XCTAssertTrue(titles.contains("17 分钟"), "Displayed policy must match the effective 17-minute policy; collected titles: \(titles)")
         }
         field.stringValue = "19"
         field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
         try await Task.sleep(nanoseconds: 50_000_000)
+        host.layoutSubtreeIfNeeded()
         XCTAssertEqual(preferences.policy, .idle(minutes: 19))
+        XCTAssertTrue(displayedPolicyTitles().contains("19 分钟"), "A valid edit must update the displayed policy")
         await store.lock().value
         try await Task.sleep(nanoseconds: 50_000_000)
         host.layoutSubtreeIfNeeded()
